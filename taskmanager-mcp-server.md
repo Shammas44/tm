@@ -376,12 +376,14 @@ from pydantic import BaseModel, Field
 from typing import List, Optional
 from datetime import datetime
 
+
 class TaskAnnotation(BaseModel):
     timestamp: datetime
     author: str
     summary: str
     evidence: Optional[str] = None
     confidence: float = Field(ge=0.0, le=1.0)
+
 
 class Task(BaseModel):
     uuid: str = Field(description="Immutable UUIDv4")

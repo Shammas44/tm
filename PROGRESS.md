@@ -13,14 +13,14 @@ This document tracks implementation progress across all engineering slices defin
 ---
 
 ## Phase 1: Environment & Project Scaffolding
-- [ ] **Slice 1.1: Project Scaffolding & Toolchain Configuration**
-  - [ ] Initialize Python 3.12+ project with `uv`
-  - [ ] Configure `pyproject.toml` with `mcp`, `pydantic>=2.7`, `aiosqlite`, `pyjwt[crypto]`, `cryptography`, `structlog`
-  - [ ] Configure `ruff` (linting & formatting) and `pytest` with async support
-- [ ] **Slice 1.2: Shared Error Envelopes & Diagnostics**
-  - [ ] Implement domain exception hierarchy (`TaskManagerError`, `InvariantViolationError`, etc.)
-  - [ ] Implement MCP JSON-RPC 2.0 error data payload serializer
-  - [ ] Configure stderr-only structured logger (preserving stdout for stdio transport)
+- [x] **Slice 1.1: Project Scaffolding & Toolchain Configuration**
+  - [x] Initialize Python 3.12+ project with `uv` / `pyproject.toml`
+  - [x] Configure `pyproject.toml` with `mcp`, `pydantic>=2.7`, `aiosqlite`, `pyjwt[crypto]`, `cryptography`, `structlog`
+  - [x] Configure `ruff` (linting & formatting) and `pytest` with async support
+- [x] **Slice 1.2: Shared Error Envelopes & Diagnostics**
+  - [x] Implement domain exception hierarchy (`TaskManagerError`, `InvariantViolationError`, etc.)
+  - [x] Implement MCP JSON-RPC 2.0 error data payload serializer
+  - [x] Configure stderr-only structured logger (preserving stdout for stdio transport)
 
 ---
 

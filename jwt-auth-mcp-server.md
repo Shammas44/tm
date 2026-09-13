@@ -421,15 +421,13 @@ from mcp_auth_verifier import MCPTokenVerifier, TokenValidationError
 verifier = MCPTokenVerifier(
     public_key_path="/etc/mcp/keys/public.pem",
     expected_aud="taskmanager-mcp",
-    revocations_db_path="/etc/mcp/revocations.db"  # Optional local check
+    revocations_db_path="/etc/mcp/revocations.db",  # Optional local check
 )
+
 
 def authenticate_tool_request(token: str, required_permission: str) -> dict:
     try:
-        claims = verifier.verify(
-            token=token,
-            required_permissions=[required_permission]
-        )
+        claims = verifier.verify(token=token, required_permissions=[required_permission])
         return claims
     except TokenValidationError as err:
         raise PermissionError(f"Authentication failed: {err.message} (code: {err.code})")

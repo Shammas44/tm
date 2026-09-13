@@ -25,17 +25,17 @@ This document tracks implementation progress across all engineering slices defin
 ---
 
 ## Phase 2: Storage & Persistence Foundations
-- [ ] **Slice 2.1: Hermetic Taskwarrior Subprocess Bridge**
-  - [ ] Implement project-sandboxed `taskrc` and `data.location` initialization
-  - [ ] Register agent UDAs (`uuid`, `component`, `confidence`, `estimate_minutes`, `evidence`)
-  - [ ] Implement cross-process file locking (`fcntl.flock` on `session.lock`)
-  - [ ] Implement asynchronous CLI wrapper (`task rc:<path> export`)
-  - [ ] Enforce strict mapping to immutable **UUIDv4** across all public interfaces
-- [ ] **Slice 2.2: SQLite Memory & Knowledge Store**
-  - [ ] Initialize `memory.db` with WAL mode
-  - [ ] Implement schema for `sessions`, `observations`, `blockers`, `audit_log`, `reflections`
-  - [ ] Configure `observations_fts` (SQLite FTS5 virtual table with BM25 ranking)
-  - [ ] Implement FTS synchronization triggers (insert, update, delete)
+- [x] **Slice 2.1: Hermetic Taskwarrior Subprocess Bridge**
+  - [x] Implement project-sandboxed `taskrc` and `data.location` initialization
+  - [x] Register agent UDAs (`uuid`, `component`, `confidence`, `estimate_minutes`, `evidence`)
+  - [x] Implement cross-process file locking (`fcntl.flock` on `session.lock`)
+  - [x] Implement asynchronous CLI wrapper (`task rc:<path> export`)
+  - [x] Enforce strict mapping to immutable **UUIDv4** across all public interfaces
+- [x] **Slice 2.2: SQLite Memory & Knowledge Store**
+  - [x] Initialize `memory.db` with WAL mode
+  - [x] Implement schema for `sessions`, `observations`, `blockers`, `audit_log`, `reflections`
+  - [x] Configure `observations_fts` (SQLite FTS5 virtual table with BM25 ranking)
+  - [x] Implement FTS synchronization triggers (insert, update, delete)
 
 ---
 

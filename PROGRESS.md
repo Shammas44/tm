@@ -48,17 +48,17 @@ This document tracks implementation progress across all engineering slices defin
 ---
 
 ## Phase 4: Workflow Invariant Enforcement Engine
-- [ ] **Slice 4.1: Session & Completion Invariants (Rules 1, 2, 3, 7)**
-  - [ ] Enforce **Rule 1**: Active task required before task modification/progress
-  - [ ] Enforce **Rule 2**: Mandatory completion summary (>=20 chars) and evidence (>=10 chars)
-  - [ ] Enforce **Rule 3**: Clean session exit (requires `next_action` if unfinished tasks exist)
-  - [ ] Enforce **Rule 7**: Reflection gate threshold (triggers `REFLECTION_REQUIRED`)
-- [ ] **Slice 4.2: Dependency DAG & Blocker Invariants (Rules 4, 5, 6)**
-  - [ ] Enforce **Rule 4**: Blocker binds to task and sets status to `BLOCKED`
-  - [ ] Enforce **Rule 5**: Knowledge taxonomy (durable observations vs task annotations)
-  - [ ] Enforce **Rule 6**: Dependency cycle detection (DFS on DAG) & prerequisite completion check
-- [ ] **Slice 4.3: Priority Task Scheduler**
-  - [ ] Implement `task_get_next` calculation based on urgency, dependencies, blockers, and reflection state
+- [x] **Slice 4.1: Session & Completion Invariants (Rules 1, 2, 3, 7)**
+  - [x] Enforce **Rule 1**: Active task required before task modification/progress
+  - [x] Enforce **Rule 2**: Mandatory completion summary (>=20 chars) and evidence (>=10 chars)
+  - [x] Enforce **Rule 3**: Clean session exit (requires `next_action` if unfinished tasks exist)
+  - [x] Enforce **Rule 7**: Reflection gate threshold (triggers `REFLECTION_REQUIRED`)
+- [x] **Slice 4.2: Dependency DAG & Blocker Invariants (Rules 4, 5, 6)**
+  - [x] Enforce **Rule 4**: Blocker binds to task and sets status to `BLOCKED`
+  - [x] Enforce **Rule 5**: Knowledge taxonomy (durable observations vs task annotations)
+  - [x] Enforce **Rule 6**: Dependency cycle detection (DFS on DAG) & prerequisite completion check
+- [x] **Slice 4.3: Intelligent Task Scheduler**
+  - [x] Implement `task_get_next` calculation based on urgency, dependencies, blockers, and reflection state
 
 ---
 

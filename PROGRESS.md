@@ -89,12 +89,12 @@ This document tracks implementation progress across all engineering slices defin
 ---
 
 ## Phase 7: End-to-End Integration & Agent Verification
-- [ ] **Slice 7.1: Subprocess Stdio Integration Test Suite**
-  - [ ] Test end-to-end token minting -> stdio process spawn -> session initialization
-  - [ ] Test complete workflow loop (task creation -> active -> evidence -> completion -> exit)
-  - [ ] Test context reset recovery (second session recovers state & next action)
-  - [ ] Test invariant violation rejections over stdio transport
-- [ ] **Slice 7.2: Agent Host Configurations & Quickstart**
-  - [ ] Provide ready-to-use Claude Desktop configuration
-  - [ ] Provide ready-to-use Cursor configuration
-  - [ ] Create project bootstrap and smoke-test script
+- [x] **Slice 7.1: Subprocess Stdio Integration Test Suite**
+  - [x] Test end-to-end token minting -> stdio process spawn -> session initialization
+  - [x] Test complete workflow loop (task creation -> active -> evidence -> completion -> exit)
+  - [x] Test context reset recovery (second session recovers state & next action)
+  - [x] Test invariant violation rejections over stdio transport
+- [x] **Slice 7.2: Agent Host Configurations & Quickstart**
+  - [x] Provide ready-to-use Claude Desktop configuration (`templates/claude_desktop_config.json`)
+  - [x] Provide ready-to-use Cursor configuration (`templates/cursor_config.json`)
+  - [x] Create project bootstrap and token minting script (`scripts/generate_dev_token.py`)

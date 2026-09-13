@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "taskmanager": {
+      "command": "python3",
+      "args": [
+        "-m",
+        "taskmanager_mcp",
+        "--projects-root",
+        "/Users/YOUR_USERNAME/.taskmanager/projects",
+        "--public-key-path",
+        "/Users/YOUR_USERNAME/.taskmanager/keys/public.pem"
+      ],
+      "env": {
+        "TASKMANAGER_AUTH_TOKEN": "YOUR_JWT_ACCESS_TOKEN_HERE"
+      }
+    }
+  }
+}

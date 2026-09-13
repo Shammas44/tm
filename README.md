@@ -44,6 +44,7 @@ This repository contains two production-ready, professional technical specificat
 
 ## Document Index
 
+* 📖 [**User Guide & Operational Manual (`USER_GUIDE.md`)**](file:///Users/sebastientraber/Documents/Prog/sandbox/taskmanager/repo/USER_GUIDE.md)
 * 📘 [TaskManager MCP Server: Technical Specification (v2.0)](file:///Users/sebastientraber/Documents/Prog/sandbox/taskmanager/repo/taskmanager-mcp-server.md)
 * 🔐 [JWT Auth MCP Server: Technical Specification (v1.0)](file:///Users/sebastientraber/Documents/Prog/sandbox/taskmanager/repo/jwt-auth-mcp-server.md)
 * 🗺️ [Implementation Roadmap (`ROADMAP.md`)](file:///Users/sebastientraber/Documents/Prog/sandbox/taskmanager/repo/ROADMAP.md)

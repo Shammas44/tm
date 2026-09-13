@@ -73,18 +73,18 @@ This document tracks implementation progress across all engineering slices defin
 ---
 
 ## Phase 6: Stdio MCP Server & Tool Registry
-- [ ] **Slice 6.1: Stdio Transport Loop & Session Tools**
-  - [ ] Implement stdio JSON-RPC server loop using MCP SDK
-  - [ ] Implement subprocess environment token extraction (`TASKMANAGER_AUTH_TOKEN`)
-  - [ ] Register `session_begin`, `session_heartbeat`, `session_end`
-  - [ ] Implement append-only audit trail logging
-- [ ] **Slice 6.2: Task Execution Tools**
-  - [ ] Register `task_get_next`, `task_start`, `task_create`, `task_create_subtask`
-  - [ ] Register `task_complete`, `task_annotate`, `task_get`, `task_list`
-- [ ] **Slice 6.3: Knowledge, Blocker & Reflection Tools**
-  - [ ] Register `observation_record` and `observation_search` (FTS5 BM25)
-  - [ ] Register `blocker_create` and `blocker_resolve`
-  - [ ] Register `workflow_reflect`
+- [x] **Slice 6.1: Stdio Transport Loop & Session Tools**
+  - [x] Implement stdio JSON-RPC server loop using MCP SDK
+  - [x] Implement subprocess environment token extraction (`TASKMANAGER_AUTH_TOKEN`)
+  - [x] Register `session_begin`, `session_heartbeat`, `session_end`
+  - [x] Implement append-only audit trail logging
+- [x] **Slice 6.2: Task Execution Tools**
+  - [x] Register `task_get_next`, `task_start`, `task_create`, `task_create_subtask`
+  - [x] Register `task_complete`, `task_annotate`, `task_get`, `task_list`
+- [x] **Slice 6.3: Knowledge, Blocker & Reflection Tools**
+  - [x] Register `observation_record` and `observation_search` (FTS5 BM25)
+  - [x] Register `blocker_create` and `blocker_resolve`
+  - [x] Register `workflow_reflect`
 
 ---
 

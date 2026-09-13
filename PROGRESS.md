@@ -63,12 +63,12 @@ This document tracks implementation progress across all engineering slices defin
 ---
 
 ## Phase 5: Security & Verification Middleware
-- [ ] **Slice 5.1: Embedded JWT Validator & Project Sandbox Guard**
-  - [ ] Implement JWT signature verification (Ed25519, RS256, HS256)
-  - [ ] Implement claims validation (`sub`, `aud == "taskmanager-mcp"`, `project`, `role`, `permissions`, `exp`)
-  - [ ] Implement test fixture token generator for unit & integration tests
-  - [ ] Implement project directory path confinement and traversal guard
-  - [ ] Implement RBAC permission check per operation
+- [x] **Slice 5.1: Embedded JWT Validator & Project Sandbox Guard**
+  - [x] Implement JWT signature verification (Ed25519, RS256, HS256)
+  - [x] Implement claims validation (`sub`, `aud == "taskmanager-mcp"`, `project`, `role`, `permissions`, `exp`)
+  - [x] Implement test fixture token generator for unit & integration tests
+  - [x] Implement project directory path confinement and traversal guard
+  - [x] Implement RBAC permission check per operation
 
 ---
 

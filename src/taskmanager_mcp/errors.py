@@ -89,9 +89,10 @@ class ProjectMismatchError(TaskManagerError):
         self,
         requested_project: str,
         token_project: str,
+        detail: str | None = None,
         **extra: Any,
     ):
-        msg = (
+        msg = detail or (
             f"Project access violation: Token is confined to project '{token_project}', "
             f"cannot access '{requested_project}'."
         )
@@ -100,7 +101,7 @@ class ProjectMismatchError(TaskManagerError):
             message=msg,
             error_code="PROJECT_MISMATCH",
             retryable=False,
-            detail=msg,
+            detail=detail or msg,
             remedy=remedy,
             requested_project=requested_project,
             token_project=token_project,

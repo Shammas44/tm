@@ -40,10 +40,10 @@ This document tracks implementation progress across all engineering slices defin
 ---
 
 ## Phase 3: Domain Models & Lifecycle State Machines
-- [ ] **Slice 3.1: Task & Session Domain Models**
-  - [ ] Define Pydantic models: `Task`, `TaskAnnotation`, `Session`, `Observation`, `Blocker`, `Reflection`
-  - [ ] Implement task state machine (`PENDING`, `READY`, `ACTIVE`, `BLOCKED`, `COMPLETED`, `DELETED`)
-  - [ ] Implement session state machine & zombie detection via stale heartbeats
+- [x] **Slice 3.1: Task & Session Domain Models**
+  - [x] Define Pydantic models: `Task`, `TaskAnnotation`, `Session`, `Observation`, `Blocker`, `Reflection`
+  - [x] Implement task state machine (`PENDING`, `READY`, `ACTIVE`, `BLOCKED`, `COMPLETED`, `DELETED`)
+  - [x] Implement session state machine & zombie detection via stale heartbeats
 
 ---
 

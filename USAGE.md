@@ -322,28 +322,30 @@ Full-screen interactive terminal dashboard built with Bubbletea and Lipgloss wit
 * **Vim-Style Navigation & Keyboard Actions:**
   - `j` / `k` or `Down` / `Up`: Navigate rows down / up
   - `h` / `l` or `Left` / `Right`: Select column left / right
+  - `J` / `K` or `Ctrl+D` / `Ctrl+U`: Scroll task details inspection pane down / up
   - `gg`: Jump to top of task list (first task)
   - `G` or `End`: Jump to bottom of task list (last task)
   - `PgUp` / `PgDown`: Scroll task list by page
   - `Tab` / `Shift+Tab`: Cycle through categories (`All`, `Ready`, `Pending`, `In Progress`, `Blocked`, `Completed`)
   - `1` - `6`: Jump directly to category
+  - `s`: Sort by selected column (press again to reverse direction)
   - `a` or `c`: **Create new task** using `$EDITOR`
   - `e`: **Edit selected task** in `$EDITOR` (or `:edit [id]`)
   - `Enter`: Start task (`in_progress` & `active`)
   - `x`: Mark task completed (`done`)
   - `b`: Prompt for blocker reason
-  - `v`: Open observation / technical notes history modal
   - `/`: Enhanced search & filter (`+tag`, `+READY`, `+BLOCKED`, `project:x`, `pri:H`, text)
   - `:`: **Enter Vim Command Mode** (`:add`, `:start`, `:done`, `:block`, `:log`, `:tag`, `:dep`, `:edit`, `:del`, `:q`)
   - `?`: **Open complete full-screen controls & shortcuts help window**
   - `q` or `Ctrl+C`: Exit TUI
 
 * **Readonly Inspection Pane:**
-  - The bottom section of the screen provides a live readonly inspection pane for the currently selected task.
-  - As you move the cursor with `j`/`k`, `gg`, or `G`, the pane dynamically updates to show:
-    - Status, Priority, Project, Tags, and Dependencies
-    - Task Description
-    - Timestamped Observation Notes history
+  - The bottom section of the screen provides a live readonly inspection pane for the currently selected task without repeating information already displayed in the task row above.
+  - Dynamically displays:
+    - **Blockers:** Explicit blocker reasons and incomplete prerequisite dependency task titles and statuses.
+    - **Task Description:** Formatted multi-line description text with automatic word-wrapping.
+    - **Technical Observations:** Timestamped history of all recorded notes and discoveries.
+    - Scrollable directly with `J` / `K` or `Ctrl+D` / `Ctrl+U`.
 
 * **Command Mode (`:`):**
   - Pressing `:` activates the bottom command prompt:

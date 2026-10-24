@@ -18,14 +18,13 @@ import (
 var (
 	titleStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("205")).
-			Background(lipgloss.Color("235")).
+			Foreground(lipgloss.Color("12")).
 			Padding(0, 1)
 
 	activeTabStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.Color("15")).
-			Background(lipgloss.Color("62")).
+			Background(lipgloss.Color("25")).
 			Padding(0, 1)
 
 	headerCellStyle = lipgloss.NewStyle().
@@ -35,16 +34,16 @@ var (
 	headerSelectedColStyle = lipgloss.NewStyle().
 				Bold(true).
 				Foreground(lipgloss.Color("255")).
-				Background(lipgloss.Color("62")) // Royal Indigo
+				Background(lipgloss.Color("33")) // Lighter blue for selected column header
 
 	selectedRowStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("255")).
-				Background(lipgloss.Color("237"))
+				Background(lipgloss.Color("25")) // Blue for the complete selected row
 
 	selectedCellStyle = lipgloss.NewStyle().
 				Bold(true).
 				Foreground(lipgloss.Color("255")).
-				Background(lipgloss.Color("62")) // Royal Indigo (replaces green/cyan)
+				Background(lipgloss.Color("33")) // Lighter blue for selected column cell in selected row
 
 	inProgressStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Bold(true)
 	completedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
@@ -58,7 +57,7 @@ var (
 	lowPrioStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 
 	helpStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
-	paneBarHead  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
+	paneBarHead  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
 	paneSubStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 	cmdPrompt    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("11"))
 
@@ -83,7 +82,6 @@ const (
 	ModeSearch
 	ModeBlockInput
 	ModeHelp
-	ModeObservations
 )
 
 type editorDoneMsg struct {
@@ -106,7 +104,6 @@ type Model struct {
 	previewScroll    int
 	sortOrder        SortOrder
 	viewMode         ViewMode
-	observations     []*model.Observation // For dedicated modal
 	selectedTaskObs  []*model.Observation // For bottom readonly inspection pane
 	searchQuery      string
 	commandInput     string // For Vim command mode ':'
@@ -425,15 +422,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		if m.viewMode == ModeObservations {
-			switch msg.String() {
-			case "esc", "q", "v", "enter":
-				m.viewMode = ModeList
-				return m, nil
-			}
-			return m, nil
-		}
-
 		if m.viewMode == ModeSearch {
 			switch msg.String() {
 			case "esc":
@@ -688,14 +676,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.tasks) > 0 && m.cursor < len(m.tasks) {
 				m.blockInput = ""
 				m.viewMode = ModeBlockInput
-			}
-
-		case "v": // View observations modal
-			if len(m.tasks) > 0 && m.cursor < len(m.tasks) {
-				t := m.tasks[m.cursor]
-				obs, _ := m.store.ListObservations(ctx, store.ObservationFilter{TaskID: &t.ID})
-				m.observations = obs
-				m.viewMode = ModeObservations
 			}
 
 		case "/": // Search
@@ -1047,13 +1027,13 @@ func (m Model) View() string {
 	s.WriteString(activeTabStyle.Render(selectedTabBanner))
 	s.WriteString(" ")
 
-	// Requirement 2: Continuous browsing range info
+	// Range & help shortcut info
 	rangeInfo := ""
 	if len(m.tasks) > 0 {
 		visibleEnd := min(len(m.tasks), m.scrollOffset+m.availableRows())
-		rangeInfo = fmt.Sprintf("[%d-%d of %d] • Sort: %s", m.scrollOffset+1, visibleEnd, len(m.tasks), m.sortOrder.Label())
+		rangeInfo = fmt.Sprintf("[%d-%d of %d]  ?: help", m.scrollOffset+1, visibleEnd, len(m.tasks))
 	} else {
-		rangeInfo = fmt.Sprintf("[0 tasks] • Sort: %s", m.sortOrder.Label())
+		rangeInfo = "[0 tasks]  ?: help"
 	}
 	s.WriteString(helpStyle.Render(rangeInfo))
 	s.WriteString("\n\n")
@@ -1070,20 +1050,6 @@ func (m Model) View() string {
 		t := m.tasks[m.cursor]
 		s.WriteString(fmt.Sprintf("Enter block reason for #%d '%s': %s█\n(press Enter to confirm, Esc to cancel)\n\n",
 			t.ID, t.Title, m.blockInput))
-		return s.String()
-	}
-
-	if m.viewMode == ModeObservations {
-		t := m.tasks[m.cursor]
-		s.WriteString(fmt.Sprintf("=== Observations for Task #%d: %s ===\n\n", t.ID, t.Title))
-		if len(m.observations) == 0 {
-			s.WriteString("  No observations recorded for this task.\n")
-		} else {
-			for _, o := range m.observations {
-				s.WriteString(fmt.Sprintf("  • [%s] %s\n", o.CreatedAt.Format("2006-01-02 15:04:05"), o.Content))
-			}
-		}
-		s.WriteString("\n" + helpStyle.Render("Press Esc or Enter to return to task list"))
 		return s.String()
 	}
 
@@ -1220,13 +1186,11 @@ func (m Model) View() string {
 	// 6. Requirement 7: Readonly Detail Inspection Pane
 	s.WriteString(m.renderDetailPane())
 
-	// 7. Requirement 8: Command Mode Input or Status Line
+	// Command Mode Input or Status Message (Controls info bar completely removed)
 	if m.viewMode == ModeCommand {
 		s.WriteString(cmdPrompt.Render(":") + m.commandInput + "█\n")
 	} else if m.statusMsg != "" {
 		s.WriteString(helpStyle.Render("Status: ") + m.statusMsg + "\n")
-	} else {
-		s.WriteString(helpStyle.Render("Normal Mode • h/l: col • j/k: row • s: sort • J/K: details scroll • :: cmd • ?: help") + "\n")
 	}
 
 	return s.String()
@@ -1250,33 +1214,43 @@ func (m Model) renderDetailPane() string {
 
 	t := m.tasks[m.cursor]
 
-	// 1. Metadata line
-	var metaParts []string
-	metaParts = append(metaParts, fmt.Sprintf("Status: %s", t.Status))
-	metaParts = append(metaParts, fmt.Sprintf("Pri: %s", t.Priority))
-	if t.Project != "" {
-		metaParts = append(metaParts, fmt.Sprintf("Project: %s", t.Project))
-	}
-	if len(t.Tags) > 0 {
-		metaParts = append(metaParts, fmt.Sprintf("Tags: [%s]", strings.Join(t.Tags, ", ")))
-	}
-	if len(t.Dependencies) > 0 {
-		var depStrs []string
-		for _, d := range t.Dependencies {
-			depStrs = append(depStrs, strconv.FormatInt(d, 10))
-		}
-		metaParts = append(metaParts, fmt.Sprintf("Deps: #%s", strings.Join(depStrs, ", #")))
-	}
-	allLines = append(allLines, paneSubStyle.Render("  "+strings.Join(metaParts, " • ")))
-
-	// 2. Blocker reason
+	// 1. Blockers info (Reason + Incomplete Prerequisite Tasks) - no duplicate metadata
+	hasBlockers := false
 	if t.BlockerReason != "" {
-		allLines = append(allLines, blockedStyle.Render("  ⚠ Blocker: "+t.BlockerReason))
+		hasBlockers = true
+		allLines = append(allLines, blockedStyle.Render("  ⚠ Blocker Reason: ")+t.BlockerReason)
 	}
 
-	// 3. Description (multi-line, nicely formatted)
+	if len(t.Dependencies) > 0 {
+		var blockingDeps []string
+		for _, depID := range t.Dependencies {
+			var depTask *model.Task
+			for _, other := range m.allTasks {
+				if other.ID == depID {
+					depTask = other
+					break
+				}
+			}
+			if depTask != nil && depTask.Status != model.StatusCompleted {
+				blockingDeps = append(blockingDeps, fmt.Sprintf("#%d %q (%s)", depTask.ID, truncate(depTask.Title, 25), depTask.Status))
+			} else if depTask == nil {
+				blockingDeps = append(blockingDeps, fmt.Sprintf("#%d (unknown)", depID))
+			}
+		}
+		if len(blockingDeps) > 0 {
+			hasBlockers = true
+			allLines = append(allLines, blockedStyle.Render("  ⚠ Blocked by Prerequisite: ")+strings.Join(blockingDeps, ", "))
+		} else if t.Status == model.StatusPending && !hasBlockers {
+			allLines = append(allLines, completedStyle.Render("  ✓ All prerequisites completed (Ready to start)"))
+		}
+	}
+
+	// 2. Description (multi-line, nicely formatted)
 	desc := strings.TrimSpace(t.Description)
 	if desc != "" {
+		if hasBlockers {
+			allLines = append(allLines, "")
+		}
 		allLines = append(allLines, paneBarHead.Render("  Description:"))
 		descWrapped := wrapText(desc, max(30, m.width-6), "    ")
 		for _, dl := range descWrapped {
@@ -1284,15 +1258,14 @@ func (m Model) renderDetailPane() string {
 		}
 	}
 
-	// 4. Observations & Notes (multi-line, nicely formatted)
-	if len(m.selectedTaskObs) == 0 {
-		if desc == "" {
-			allLines = append(allLines, paneSubStyle.Render("  Notes: (None recorded)"))
+	// 3. Observations & Notes (multi-line, nicely formatted)
+	if len(m.selectedTaskObs) > 0 {
+		if hasBlockers || desc != "" {
+			allLines = append(allLines, "")
 		}
-	} else {
 		allLines = append(allLines, paneBarHead.Render(fmt.Sprintf("  Observations (%d recorded):", len(m.selectedTaskObs))))
 		for _, o := range m.selectedTaskObs {
-			headerPrefix := fmt.Sprintf("  • [%s] (#%d) ", o.CreatedAt.Local().Format("15:04"), o.ID)
+			headerPrefix := fmt.Sprintf("  • [%s] (#%d) ", o.CreatedAt.Local().Format("2006-01-02 15:04"), o.ID)
 			subIndent := "      "
 			contentLines := strings.Split(strings.TrimSpace(o.Content), "\n")
 			for lineIdx, rawLine := range contentLines {
@@ -1318,6 +1291,8 @@ func (m Model) renderDetailPane() string {
 				}
 			}
 		}
+	} else if !hasBlockers && desc == "" {
+		allLines = append(allLines, paneSubStyle.Render("  (No description, blockers, or observations recorded)"))
 	}
 
 	// Calculate scrolling
@@ -1339,7 +1314,7 @@ func (m Model) renderDetailPane() string {
 		)
 	}
 
-	sepTitle := fmt.Sprintf("── Task #%d: %s%s", t.ID, truncate(t.Title, 40), scrollHint)
+	sepTitle := fmt.Sprintf("── Details #%d%s ", t.ID, scrollHint)
 	remainingLen := max(0, m.width-len(sepTitle)-2)
 	headerBar := paneBarHead.Render(sepTitle) + paneSubStyle.Render(strings.Repeat("─", remainingLen))
 
@@ -1363,78 +1338,79 @@ func (m Model) renderDetailPane() string {
 }
 
 func (m Model) renderFullScreenHelp() string {
-	rawHelpLines := []string{
-		"================================================================================",
-		"                       TaskManager TUI Controls & Help                          ",
-		"================================================================================",
-		"",
-		"NAVIGATION & SELECTION (Vim-Style):",
-		"  j, Down              Move row cursor down",
-		"  k, Up                Move row cursor up",
-		"  h, Left              Select column to the left",
-		"  l, Right             Select column to the right",
-		"  J, Ctrl+D            Scroll task details inspection pane down",
-		"  K, Ctrl+U            Scroll task details inspection pane up",
-		"  gg                   Jump to top of task list (first task)",
-		"  G, End               Jump to bottom of task list (last task)",
-		"  PgUp, PgDown         Scroll task list by page",
-		"  Tab, Shift+Tab       Cycle category tabs (All, Ready, Pending, InProg, Blocked, Done)",
-		"  1 - 6                Jump directly to category tab",
-		"",
-		"SORTING (Interactive Column Sorting):",
-		"  s                    Sort by currently selected column.",
-		"                       Pressing 's' again toggles sort direction (▲ / ▼).",
-		"",
-		"TASK ACTIONS:",
-		"  a, c                 Create new task using $EDITOR (vim/nano)",
-		"  e                    Edit selected task in $EDITOR (modifies fields and notes)",
-		"  Enter                Start task (marks in_progress & active)",
-		"  x                    Mark task completed (done)",
-		"  b                    Block task (prompts for blocker reason)",
-		"  v                    View task observation notes modal",
-		"",
-		"COMMAND MODE (Vim-Style ':' Commands):",
-		"  :                    Enter command line mode",
-		"  :q, :exit            Quit TaskManager",
-		"  :add <title>         Create task with title",
-		"  :start [id]          Start task (defaults to currently selected task)",
-		"  :done [id]           Mark task completed",
-		"  :block [id] <reason> Block task with reason",
-		"  :log [id] <note>     Append note to task observation history",
-		"  :tag [id] +tag -tag  Add or remove tags",
-		"  :dep [id] +dep -dep  Add or remove dependencies",
-		"  :del [id]            Delete / cancel task",
-		"  :edit [id]           Open task in $EDITOR",
-		"",
-		"FILTERING & SEARCH:",
-		"  /                    Filter by text, +tag, +READY, +BLOCKED, project:x, pri:H",
-		"  Esc                  Clear filter / exit modals",
-		"  ?                    Toggle this help window",
-		"",
-		"================================================================================",
-		"            Use j/k or Up/Down to scroll • Esc/Enter/? to close                 ",
-		"================================================================================",
+	boxWidth := min(78, max(50, m.width-4))
+	visibleHeight := max(8, m.height-2)
+
+	hKey := func(k string) string {
+		return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12")).Width(18).Render(k)
+	}
+	hDesc := func(d string) string {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Render(d)
+	}
+	hSec := func(t string) string {
+		return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("33")).Render("── " + t + " " + strings.Repeat("─", max(0, boxWidth-len(t)-6)))
 	}
 
-	visibleHeight := max(5, m.height-2)
-	maxOffset := max(0, len(rawHelpLines)-visibleHeight)
+	lines := []string{
+		lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12")).Render("                TaskManager • Controls & Commands Reference"),
+		"",
+		hSec("NAVIGATION"),
+		hKey("  j / k, ↓ / ↑") + hDesc("Navigate rows (tasks)"),
+		hKey("  h / l, ← / →") + hDesc("Select column left / right"),
+		hKey("  gg / G") + hDesc("Jump to first (top) / last (bottom) task"),
+		hKey("  PgUp / PgDown") + hDesc("Scroll task list by page"),
+		hKey("  Tab / Shift+Tab") + hDesc("Cycle category tabs"),
+		hKey("  1 - 6") + hDesc("Jump directly to category tab"),
+		"",
+		hSec("INSPECTION & SCROLLING"),
+		hKey("  J / K") + hDesc("Scroll task detail pane down / up"),
+		hKey("  Ctrl+D / Ctrl+U") + hDesc("Half-page scroll detail pane down / up"),
+		"",
+		hSec("COLUMN SORTING"),
+		hKey("  s") + hDesc("Sort by selected column (press again to reverse ▲/▼)"),
+		"",
+		hSec("TASK ACTIONS"),
+		hKey("  Enter") + hDesc("Start task (mark in_progress & active)"),
+		hKey("  x") + hDesc("Complete task (mark done)"),
+		hKey("  b") + hDesc("Block task (prompts for blocker reason)"),
+		hKey("  a, c") + hDesc("Create new task in $EDITOR"),
+		hKey("  e") + hDesc("Edit task & past observations in $EDITOR"),
+		"",
+		hSec("VIM COMMAND MODE (:)"),
+		hKey("  :add <title>") + hDesc("Create new task"),
+		hKey("  :start [id]") + hDesc("Start task (defaults to selected)"),
+		hKey("  :done [id]") + hDesc("Complete task"),
+		hKey("  :block [id] <r>") + hDesc("Block task with reason"),
+		hKey("  :log [id] <note>") + hDesc("Append note/observation"),
+		hKey("  :tag [id] +/-tag") + hDesc("Add or remove tags"),
+		hKey("  :dep [id] +/-id") + hDesc("Add or remove dependencies"),
+		hKey("  :edit [id]") + hDesc("Edit task in $EDITOR"),
+		hKey("  :del [id]") + hDesc("Delete task"),
+		hKey("  :q, :wq, :exit") + hDesc("Quit TaskManager"),
+		"",
+		hSec("SEARCH & FILTER"),
+		hKey("  /") + hDesc("Search text, +tag, +READY, +BLOCKED, pri:H, project:x"),
+		hKey("  Esc") + hDesc("Clear search / close modal"),
+		"",
+		lipgloss.NewStyle().Foreground(lipgloss.Color("243")).Render("Press Esc, Enter, q, or ? to return to tasks • j/k to scroll help"),
+	}
+
+	maxOffset := max(0, len(lines)-visibleHeight)
 	if m.helpScrollOffset > maxOffset {
 		m.helpScrollOffset = maxOffset
 	}
 
-	endIdx := min(len(rawHelpLines), m.helpScrollOffset+visibleHeight)
-	visibleLines := rawHelpLines[m.helpScrollOffset:endIdx]
-
-	boxWidth := max(40, m.width-4)
-	content := strings.Join(visibleLines, "\n")
+	endIdx := min(len(lines), m.helpScrollOffset+visibleHeight)
+	visibleLines := lines[m.helpScrollOffset:endIdx]
 
 	fullBoxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("62")).
+		BorderForeground(lipgloss.Color("12")).
+		Padding(0, 1).
 		Width(boxWidth).
 		Height(visibleHeight)
 
-	return fullBoxStyle.Render(content)
+	return fullBoxStyle.Render(strings.Join(visibleLines, "\n"))
 }
 
 func (m Model) countForTab(tabIdx int) int {

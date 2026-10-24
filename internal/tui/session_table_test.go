@@ -211,4 +211,118 @@ func TestTUITableSwitching(t *testing.T) {
 	if newM4.activeTable != TableTasks {
 		t.Fatalf("expected :tasks command to switch to TableTasks, got %v", newM4.activeTable)
 	}
+
+	// Verify switching table did NOT set "Switched to" in statusMsg
+	if strings.Contains(newM4.statusMsg, "Switched to") {
+		t.Errorf("expected no 'Switched to' statusMsg, got: %s", newM4.statusMsg)
+	}
+}
+
+func TestTopAndBottomStatusLines(t *testing.T) {
+	task := &model.Task{
+		ID:       1,
+		Title:    "Test Task",
+		Status:   model.StatusInProgress,
+		Active:   true,
+		Priority: model.PriorityHigh,
+	}
+
+	m := Model{
+		width:       100,
+		height:      24,
+		activeTable: TableTasks,
+		activeTab:   0,
+		tasks:       []*model.Task{task},
+		allTasks:    []*model.Task{task},
+		viewMode:    ModeList,
+	}
+
+	// 1. Top status line checks
+	top := m.renderTopStatusLine()
+	if !strings.Contains(top, AppName) {
+		t.Errorf("expected top line to contain app name '%s', got: %s", AppName, top)
+	}
+	if !strings.Contains(top, Version) {
+		t.Errorf("expected top line to contain version '%s', got: %s", Version, top)
+	}
+	if !strings.Contains(top, "View: Tasks") {
+		t.Errorf("expected top line to contain 'View: Tasks', got: %s", top)
+	}
+	if !strings.Contains(top, "Category: All") {
+		t.Errorf("expected top line to contain 'Category: All', got: %s", top)
+	}
+	if !strings.Contains(top, "?: Help") {
+		t.Errorf("expected top line to contain '?: Help', got: %s", top)
+	}
+
+	// 2. Bottom status line checks in ModeList
+	bottom := m.renderBottomStatusLine()
+	if !strings.Contains(bottom, "Records: 1") {
+		t.Errorf("expected bottom line to contain 'Records: 1', got: %s", bottom)
+	}
+	if !strings.Contains(bottom, "Filter: None") {
+		t.Errorf("expected bottom line to contain 'Filter: None', got: %s", bottom)
+	}
+
+	// 3. Bottom status line in ModeSearch
+	m.viewMode = ModeSearch
+	m.searchQuery = "unit"
+	bottomSearch := m.renderBottomStatusLine()
+	if !strings.Contains(bottomSearch, "/unit█") {
+		t.Errorf("expected bottom line in search mode to show '/unit█', got: %s", bottomSearch)
+	}
+
+	// 4. Bottom status line in ModeCommand
+	m.viewMode = ModeCommand
+	m.commandInput = "start 1"
+	bottomCmd := m.renderBottomStatusLine()
+	if !strings.Contains(bottomCmd, ":start 1█") {
+		t.Errorf("expected bottom line in command mode to show ':start 1█', got: %s", bottomCmd)
+	}
+
+	// 5. Task status formatting has no '*'
+	statusText := m.formatStatusText(task)
+	if strings.Contains(statusText, "*") {
+		t.Errorf("expected status text to NOT contain asterisk '*', got: %s", statusText)
+	}
+}
+
+func TestSessionCategories(t *testing.T) {
+	now := time.Now()
+	s1 := &model.Session{
+		ID:        "sess-today",
+		StartedAt: now,
+		Status:    model.SessionStatusActive,
+		Handoff:   "Checkpoint alpha",
+	}
+	s2 := &model.Session{
+		ID:        "sess-yesterday",
+		StartedAt: now.Add(-48 * time.Hour),
+		Status:    model.SessionStatusCompleted,
+	}
+
+	m := Model{
+		allSessions: []*model.Session{s1, s2},
+	}
+
+	// Tab 0: All
+	if count := m.countForSessionTab(0); count != 2 {
+		t.Errorf("expected 2 sessions in All, got %d", count)
+	}
+	// Tab 1: Today
+	if count := m.countForSessionTab(1); count != 1 {
+		t.Errorf("expected 1 session in Today, got %d", count)
+	}
+	// Tab 2: Active
+	if count := m.countForSessionTab(2); count != 1 {
+		t.Errorf("expected 1 session in Active, got %d", count)
+	}
+	// Tab 3: Completed
+	if count := m.countForSessionTab(3); count != 1 {
+		t.Errorf("expected 1 session in Completed, got %d", count)
+	}
+	// Tab 5: Handoff
+	if count := m.countForSessionTab(5); count != 1 {
+		t.Errorf("expected 1 session in Handoff, got %d", count)
+	}
 }

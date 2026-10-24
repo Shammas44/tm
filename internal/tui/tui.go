@@ -15,6 +15,11 @@ import (
 	"taskmanager/internal/store"
 )
 
+const (
+	AppName = "TaskManager"
+	Version = "v0.1.0"
+)
+
 var (
 	titleStyle = lipgloss.NewStyle().
 			Bold(true).
@@ -66,6 +71,44 @@ var (
 	paneBarHead  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
 	paneSubStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 	cmdPrompt    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("11"))
+
+	topAppStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("255")).
+			Background(lipgloss.Color("25")).
+			Padding(0, 1)
+
+	topViewStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("14"))
+
+	topCatStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("11"))
+
+	topHelpStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("243")).
+			Padding(0, 1)
+
+	topSepStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("240"))
+
+	bottomRecordsStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("15"))
+
+	bottomFilterStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("14"))
+
+	bottomStatusMsgStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("11"))
+
+	bottomHintStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("243"))
+
+	searchPromptStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("14"))
 
 	// Column Widths with guaranteed 2-character gap separation
 	colGap          = "  "
@@ -155,7 +198,7 @@ type Model struct {
 }
 
 var tabs = []string{"All", "Ready", "Pending", "In Progress", "Blocked", "Completed"}
-var sessionTabs = []string{"All", "Active", "Completed", "Interrupted"}
+var sessionTabs = []string{"All", "Today", "Active", "Completed", "Interrupted", "Handoff"}
 
 func New(st *store.Store) Model {
 	m := Model{
@@ -290,19 +333,28 @@ func (m *Model) reloadSessions() {
 
 func (m *Model) filterSessions() {
 	var filtered []*model.Session
+	now := time.Now()
 
 	for _, s := range m.allSessions {
 		switch m.sessionActiveTab {
-		case 1: // Active
+		case 1: // Today
+			if s.StartedAt.Local().YearDay() != now.YearDay() || s.StartedAt.Local().Year() != now.Year() {
+				continue
+			}
+		case 2: // Active
 			if s.Status != model.SessionStatusActive {
 				continue
 			}
-		case 2: // Completed
+		case 3: // Completed
 			if s.Status != model.SessionStatusCompleted {
 				continue
 			}
-		case 3: // Interrupted
+		case 4: // Interrupted
 			if s.Status != model.SessionStatusInterrupted {
+				continue
+			}
+		case 5: // Handoff
+			if !hasSessionHandoff(s) {
 				continue
 			}
 		}
@@ -339,17 +391,22 @@ func (m *Model) adjustSessionScroll() {
 
 func (m Model) countForSessionTab(tabIdx int) int {
 	cnt := 0
+	now := time.Now()
 	for _, s := range m.allSessions {
 		match := false
 		switch tabIdx {
-		case 0:
+		case 0: // All
 			match = true
-		case 1:
+		case 1: // Today
+			match = s.StartedAt.Local().YearDay() == now.YearDay() && s.StartedAt.Local().Year() == now.Year()
+		case 2: // Active
 			match = (s.Status == model.SessionStatusActive)
-		case 2:
+		case 3: // Completed
 			match = (s.Status == model.SessionStatusCompleted)
-		case 3:
+		case 4: // Interrupted
 			match = (s.Status == model.SessionStatusInterrupted)
+		case 5: // Handoff
+			match = hasSessionHandoff(s)
 		}
 		if match && MatchesSessionFilter(s, m.searchQuery) {
 			cnt++
@@ -358,17 +415,26 @@ func (m Model) countForSessionTab(tabIdx int) int {
 	return cnt
 }
 
-func (m Model) topSectionOverhead() int {
-	overhead := 4 // Title banner (2) + Table header & sep (2)
-	if m.searchQuery != "" || m.viewMode == ModeSearch {
-		overhead += 2
+func hasSessionHandoff(s *model.Session) bool {
+	if s.Handoff != nil {
+		if str, ok := s.Handoff.(string); ok {
+			return strings.TrimSpace(str) != ""
+		}
+		if m, ok := s.Handoff.(map[string]any); ok {
+			return len(m) > 0
+		}
+		return true
 	}
-	return overhead
+	return strings.TrimSpace(s.Summary) != ""
+}
+
+func (m Model) topSectionOverhead() int {
+	return 4 // Top status bar (1) + Spacing (1) + Table header (1) + Table sep (1)
 }
 
 func (m Model) availableRows() int {
-	// Full screen height available for task list
-	overhead := m.topSectionOverhead() + 1 // +1 for command mode / bottom spacing line
+	// Full screen height available minus top overhead (4) and bottom status line (1)
+	overhead := m.topSectionOverhead() + 1
 	rows := m.height - overhead
 	if rows < 3 {
 		return 3
@@ -732,10 +798,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "t", "S":
 			if m.activeTable == TableTasks {
 				m.activeTable = TableSessions
-				m.statusMsg = "Switched to Sessions view (press 't' to return to tasks)"
 			} else {
 				m.activeTable = TableTasks
-				m.statusMsg = "Switched to Tasks view (press 't' to switch to sessions)"
 			}
 
 		// Requirement 1: Vertical line navigation
@@ -1102,12 +1166,10 @@ func (m Model) executeCommand(cmdStr string) (Model, tea.Cmd) {
 
 	case "tasks", "task":
 		m.activeTable = TableTasks
-		m.statusMsg = "Switched to Tasks view"
 		return m, nil
 
 	case "sessions", "session":
 		m.activeTable = TableSessions
-		m.statusMsg = "Switched to Sessions view"
 		return m, nil
 
 	case "w":
@@ -1430,93 +1492,163 @@ func (m Model) View() string {
 
 	var s strings.Builder
 
-	// 1. Header: Table indicator, Active category banner & continuous browsing range info
-	s.WriteString(titleStyle.Render("TaskManager"))
-	s.WriteString(" • ")
-
-	if m.activeTable == TableTasks {
-		s.WriteString(activeTabStyle.Render("[Tasks]"))
-		s.WriteString(" ")
-		s.WriteString(helpStyle.Render("Sessions (t)"))
-	} else {
-		s.WriteString(helpStyle.Render("Tasks (t)"))
-		s.WriteString(" ")
-		s.WriteString(activeTabStyle.Render("[Sessions]"))
-	}
-	s.WriteString("  ")
-
-	if m.activeTable == TableTasks {
-		currentTabName := tabs[m.activeTab]
-		currentTabCount := m.countForTab(m.activeTab)
-		selectedTabBanner := fmt.Sprintf("Category: %s (%d tasks)", currentTabName, currentTabCount)
-		s.WriteString(activeTabStyle.Render(selectedTabBanner))
-	} else {
-		currentTabName := sessionTabs[m.sessionActiveTab]
-		currentTabCount := m.countForSessionTab(m.sessionActiveTab)
-		selectedTabBanner := fmt.Sprintf("Category: %s (%d sessions)", currentTabName, currentTabCount)
-		s.WriteString(activeTabStyle.Render(selectedTabBanner))
-	}
-	s.WriteString(" ")
-
-	// Range & help shortcut info
-	rangeInfo := ""
-	if m.activeTable == TableTasks {
-		if len(m.tasks) > 0 {
-			visibleEnd := min(len(m.tasks), m.scrollOffset+m.availableRows())
-			rangeInfo = fmt.Sprintf("[%d-%d of %d]  ?: help", m.scrollOffset+1, visibleEnd, len(m.tasks))
-		} else {
-			rangeInfo = "[0 tasks]  ?: help"
-		}
-	} else {
-		if len(m.sessions) > 0 {
-			visibleEnd := min(len(m.sessions), m.sessionScrollOffset+m.availableRows())
-			rangeInfo = fmt.Sprintf("[%d-%d of %d]  ?: help", m.sessionScrollOffset+1, visibleEnd, len(m.sessions))
-		} else {
-			rangeInfo = "[0 sessions]  ?: help"
-		}
-	}
-	s.WriteString(helpStyle.Render(rangeInfo))
+	// 1. Top status line
+	s.WriteString(m.renderTopStatusLine())
 	s.WriteString("\n\n")
 
-	// 2. Search bar if open
-	if m.viewMode == ModeSearch {
-		s.WriteString(fmt.Sprintf("Search: %s█\n\n", m.searchQuery))
-	} else if m.searchQuery != "" {
-		s.WriteString(fmt.Sprintf("Filter: '%s' (press / to edit, esc to clear)\n\n", m.searchQuery))
-	}
-
-	// 3. Other modals
-	if m.viewMode == ModeDeleteConfirm {
-		if m.deleteBlockedMsg != "" {
-			s.WriteString(titleStyle.Render("TaskManager • Delete Task"))
-			s.WriteString("\n\n")
-			s.WriteString(blockedStyle.Render("Cannot Delete Task:\n"))
-			s.WriteString(m.deleteBlockedMsg + "\n")
-			return s.String()
-		}
-		if m.deleteTargetTask != nil {
-			s.WriteString(titleStyle.Render("TaskManager • Delete Task"))
-			s.WriteString("\n\n")
-			s.WriteString(fmt.Sprintf("Are you sure you want to permanently delete task #%d '%s'?\n\n", m.deleteTargetTask.ID, m.deleteTargetTask.Title))
-			s.WriteString(pendingStyle.Render("Press 'y' or Enter to confirm, 'n' or Esc to cancel: █\n"))
-			return s.String()
-		}
-	}
-
-	if m.viewMode == ModeBlockInput {
-		t := m.tasks[m.cursor]
-		s.WriteString(fmt.Sprintf("Enter block reason for #%d '%s': %s█\n(press Enter to confirm, Esc to cancel)\n\n",
-			t.ID, t.Title, m.blockInput))
+	// 2. Error modal if delete blocked
+	if m.viewMode == ModeDeleteConfirm && m.deleteBlockedMsg != "" {
+		s.WriteString(titleStyle.Render("TaskManager • Delete Task"))
+		s.WriteString("\n\n")
+		s.WriteString(blockedStyle.Render("Cannot Delete Task:\n"))
+		s.WriteString(m.deleteBlockedMsg + "\n")
 		return s.String()
 	}
 
+	// 3. Table content
 	if m.activeTable == TableTasks {
 		m.renderTaskTable(&s)
 	} else {
 		m.renderSessionTable(&s)
 	}
 
+	// 4. Bottom status line (records, filter, command/search prompt)
+	s.WriteString(m.renderBottomStatusLine() + "\n")
+
 	return s.String()
+}
+
+func (m Model) renderTopStatusLine() string {
+	viewName := "Tasks"
+	catName := tabs[m.activeTab]
+	catIdx := m.activeTab + 1
+	catTotal := len(tabs)
+
+	if m.activeTable == TableSessions {
+		viewName = "Sessions"
+		catName = sessionTabs[m.sessionActiveTab]
+		catIdx = m.sessionActiveTab + 1
+		catTotal = len(sessionTabs)
+	}
+
+	appStr := topAppStyle.Render(fmt.Sprintf("%s %s", AppName, Version))
+	sep := topSepStyle.Render("│")
+
+	viewText := fmt.Sprintf("View: %s (switch: t)", viewName)
+	if m.width < 95 {
+		viewText = fmt.Sprintf("View: %s (t)", viewName)
+	}
+	viewStr := topViewStyle.Render(viewText)
+
+	catText := fmt.Sprintf("Category: %s [%d/%d]", catName, catIdx, catTotal)
+	if m.width < 80 {
+		catText = fmt.Sprintf("Cat: %s", catName)
+	}
+	catStr := topCatStyle.Render(catText)
+
+	helpStr := topHelpStyle.Render("?: Help")
+
+	left := fmt.Sprintf("%s %s %s %s %s", appStr, sep, viewStr, sep, catStr)
+	leftWidth := lipgloss.Width(left)
+	helpWidth := lipgloss.Width(helpStr)
+
+	if leftWidth+helpWidth >= m.width {
+		return truncate(left+" "+helpStr, m.width)
+	}
+
+	gap := m.width - leftWidth - helpWidth
+	return left + strings.Repeat(" ", gap) + helpStr
+}
+
+func (m Model) renderBottomStatusLine() string {
+	switch m.viewMode {
+	case ModeSearch:
+		prompt := searchPromptStyle.Render("/") + m.searchQuery + "█"
+		hint := bottomHintStyle.Render("Esc: clear • Enter: confirm")
+		pW := lipgloss.Width(prompt)
+		hW := lipgloss.Width(hint)
+		if pW+hW >= m.width {
+			return truncate(prompt, m.width)
+		}
+		gap := m.width - pW - hW
+		return prompt + strings.Repeat(" ", gap) + hint
+
+	case ModeCommand:
+		prompt := cmdPrompt.Render(":") + m.commandInput + "█"
+		hint := bottomHintStyle.Render("Esc: cancel • Enter: run")
+		pW := lipgloss.Width(prompt)
+		hW := lipgloss.Width(hint)
+		if pW+hW >= m.width {
+			return truncate(prompt, m.width)
+		}
+		gap := m.width - pW - hW
+		return prompt + strings.Repeat(" ", gap) + hint
+
+	case ModeBlockInput:
+		prompt := blockedStyle.Render("Block reason: ") + m.blockInput + "█"
+		hint := bottomHintStyle.Render("Esc: cancel • Enter: save")
+		pW := lipgloss.Width(prompt)
+		hW := lipgloss.Width(hint)
+		if pW+hW >= m.width {
+			return truncate(prompt, m.width)
+		}
+		gap := m.width - pW - hW
+		return prompt + strings.Repeat(" ", gap) + hint
+
+	case ModeDeleteConfirm:
+		if m.deleteTargetTask != nil {
+			prompt := criticalPrioStyle.Render(fmt.Sprintf("Delete task #%d '%s'? (y/n): █", m.deleteTargetTask.ID, truncate(m.deleteTargetTask.Title, 25)))
+			hint := bottomHintStyle.Render("y: confirm • n/Esc: cancel")
+			pW := lipgloss.Width(prompt)
+			hW := lipgloss.Width(hint)
+			if pW+hW >= m.width {
+				return truncate(prompt, m.width)
+			}
+			gap := m.width - pW - hW
+			return prompt + strings.Repeat(" ", gap) + hint
+		}
+	}
+
+	// Normal list mode
+	var recordsStr string
+	if m.activeTable == TableTasks {
+		if len(m.tasks) == len(m.allTasks) {
+			recordsStr = fmt.Sprintf("Records: %d", len(m.tasks))
+		} else {
+			recordsStr = fmt.Sprintf("Records: %d of %d", len(m.tasks), len(m.allTasks))
+		}
+	} else {
+		if len(m.sessions) == len(m.allSessions) {
+			recordsStr = fmt.Sprintf("Records: %d", len(m.sessions))
+		} else {
+			recordsStr = fmt.Sprintf("Records: %d of %d", len(m.sessions), len(m.allSessions))
+		}
+	}
+
+	filterStr := "Filter: None"
+	if m.searchQuery != "" {
+		filterStr = fmt.Sprintf("Filter: '%s'", m.searchQuery)
+	}
+
+	recStyled := bottomRecordsStyle.Render(recordsStr)
+	fltStyled := bottomFilterStyle.Render(filterStr)
+	sep := topSepStyle.Render("│")
+
+	left := fmt.Sprintf("%s %s %s", recStyled, sep, fltStyled)
+	if m.statusMsg != "" {
+		left += " " + sep + " " + bottomStatusMsgStyle.Render(m.statusMsg)
+	}
+
+	hint := bottomHintStyle.Render("/ filter • : cmd")
+	leftW := lipgloss.Width(left)
+	hintW := lipgloss.Width(hint)
+
+	if leftW+hintW >= m.width {
+		return truncate(left, m.width)
+	}
+
+	gap := m.width - leftW - hintW
+	return left + strings.Repeat(" ", gap) + hint
 }
 
 func (m Model) renderTaskTable(s *strings.Builder) {
@@ -1605,9 +1737,6 @@ func (m Model) renderTaskTable(s *strings.Builder) {
 			titleStr := truncate(t.Title, titleWidth)
 
 			rawStatus := strings.ToUpper(string(t.Status))
-			if t.Active {
-				rawStatus = "IN_PROG*"
-			}
 			rawPrio := string(t.Priority)
 			if rawPrio == "" {
 				rawPrio = "M"
@@ -1681,14 +1810,6 @@ func (m Model) renderTaskTable(s *strings.Builder) {
 	}
 
 	for r := renderedRows; r < visibleRows; r++ {
-		s.WriteString("\n")
-	}
-
-	if m.viewMode == ModeCommand {
-		s.WriteString(cmdPrompt.Render(":") + m.commandInput + "█\n")
-	} else if m.statusMsg != "" {
-		s.WriteString(helpStyle.Render(m.statusMsg) + "\n")
-	} else {
 		s.WriteString("\n")
 	}
 }
@@ -1837,14 +1958,6 @@ func (m Model) renderSessionTable(s *strings.Builder) {
 	}
 
 	for r := renderedRows; r < visibleRows; r++ {
-		s.WriteString("\n")
-	}
-
-	if m.viewMode == ModeCommand {
-		s.WriteString(cmdPrompt.Render(":") + m.commandInput + "█\n")
-	} else if m.statusMsg != "" {
-		s.WriteString(helpStyle.Render(m.statusMsg) + "\n")
-	} else {
 		s.WriteString("\n")
 	}
 }
@@ -2009,9 +2122,6 @@ func (m Model) countForTab(tabIdx int) int {
 
 func (m Model) formatStatusText(t *model.Task) string {
 	rawStatus := strings.ToUpper(string(t.Status))
-	if t.Active {
-		rawStatus = "IN_PROG*"
-	}
 	switch t.Status {
 	case model.StatusInProgress:
 		return inProgressStyle.Render(rawStatus)

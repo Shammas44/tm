@@ -380,9 +380,21 @@ Full-screen interactive terminal dashboard built with Bubbletea and Lipgloss wit
   - Both tables maintain independent cursor positions, category filters, and scroll offsets for instant switching.
   - Both tables offer an identical visual experience: visual crosshair grid selection (blue row and lighter blue cell highlight), column sorting (`s`), category tabs (`Tab`/`Shift+Tab`/`1`-`6`), search filtering (`/`), and full-screen continuous viewport scrolling.
 
+* **Top Status Line:**
+  - `Program & Version`: `TaskManager v0.1.0`
+  - `View`: Active view indication (`View: Tasks (switch: t)` vs `View: Sessions (switch: t)`)
+  - `Category`: Currently active category filter and index (`Category: In Progress [4/6]`, `Category: Today [2/6]`)
+  - `Help Shortcut`: `?: Help`
+
+* **Bottom Status Line (Unified for Status, Commands & Live Filtering):**
+  - `Records Count`: Dynamic record count (`Records: 12` or `Records: 4 of 25` when filtered)
+  - `Current Filter`: Active search/filter string (`Filter: None` or `Filter: '+READY'`)
+  - `Interactive Input Prompt`: Pressing `/` or `:` transforms the bottom status line into an in-place live search or Vim command prompt (`/search query█` or `:done 2█`).
+  - `Action Notifications`: Transient operation feedback (e.g. `Sorted by Priority ▲`, `Completed task #3`)
+
 * **Task Table Columns:**
   - `ID`: Task auto-increment identifier
-  - `Status`: Current status (`pending`, `in_progress`, `blocked`, `completed`, `cancelled`) with active indicator (`in_prog*`)
+  - `Status`: Current status (`PENDING`, `IN_PROGRESS`, `BLOCKED`, `COMPLETED`, `CANCELLED`)
   - `Pri`: Priority (`C`, `H`, `M`, `L`)
   - `Project`: Project slug
   - `Tags`: User-defined labels (truncated with `...` if exceeding column width)
@@ -391,15 +403,9 @@ Full-screen interactive terminal dashboard built with Bubbletea and Lipgloss wit
   - `Created`: Human-readable timestamp formatted as `YYYY-MM-DD HH:MM` (e.g. `2026-10-24 14:15`)
   - `Title`: Task description/title (truncated with `...` if exceeding available terminal width)
 
-* **Session Table Columns:**
-  - `Session`: Short 8-character session identifier
-  - `Status`: Session status (`ACTIVE`, `COMPLETED`, `INTERRUPTED`)
-  - `Agent`: Agent identifier (or `human`)
-  - `Started`: Session start timestamp (`YYYY-MM-DD HH:MM`)
-  - `Duration`: Formatted execution duration (e.g. `45m 12s`, `2h 10m`)
-  - `Tasks`: Total count of tasks touched / worked on during this session
-  - `Notes`: Total count of observations / findings logged during this session
-  - `Handoff / Checkpoint`: Single-line preview of handoff instructions or latest checkpoint
+* **Session Table Columns & Categories:**
+  - **Columns:** `Session` (short ID), `Status` (`ACTIVE`, `COMPLETED`, `INTERRUPTED`), `Agent`, `Started`, `Duration`, `Tasks`, `Notes`, `Handoff / Checkpoint`
+  - **Categories (`1` - `6` / `Tab`):** `All`, `Today`, `Active`, `Completed`, `Interrupted`, `Handoff`
 
 * **Visual Grid Selection & Interactive Column Sorting:**
   - **Crosshair Selection:** Navigate rows with `j`/`k` (or `Down`/`Up`) and select columns with `h`/`l` (or `Left`/`Right`). The currently selected cell and column header are distinctly highlighted.
@@ -407,15 +413,15 @@ Full-screen interactive terminal dashboard built with Bubbletea and Lipgloss wit
   - **Continuous Backlog Browsing:** No artificial pagination; smoothly browse all tasks or sessions continuously with viewport scrolling.
 
 * **Vim-Style Navigation & Keyboard Actions:**
-  - `t` or `S`: **Toggle between Tasks and Sessions tables**
+  - `t` or `S`: **Toggle between Tasks and Sessions tables** (silent and instant)
   - `j` / `k` or `Down` / `Up`: Navigate rows down / up
   - `h` / `l` or `Left` / `Right`: Select column left / right
   - `Ctrl+D` / `Ctrl+U` or `J` / `K`: Scroll list half-page down / up
   - `gg`: Jump to top of table (first item)
   - `G` or `End`: Jump to bottom of table (last item)
   - `PgUp` / `PgDown`: Scroll table by page
-  - `Tab` / `Shift+Tab`: Cycle through category filter tabs (Tasks: `All`, `Ready`, `Pending`, `In Progress`, `Blocked`, `Completed`; Sessions: `All`, `Active`, `Completed`, `Interrupted`)
-  - `1` - `6`: Jump directly to category tab
+  - `Tab` / `Shift+Tab`: Cycle through category filter tabs
+  - `1` - `6`: Jump directly to category tab (Tasks: `All`, `Ready`, `Pending`, `In Progress`, `Blocked`, `Completed`; Sessions: `All`, `Today`, `Active`, `Completed`, `Interrupted`, `Handoff`)
   - `s`: Sort by selected column (press again to reverse direction)
   - `a` or `c`: **Create new task** using `$EDITOR` (Tasks view)
   - `e`: **Edit task** in `$EDITOR` (Tasks view) or **Inspect session YAML** (Sessions view)
@@ -424,8 +430,8 @@ Full-screen interactive terminal dashboard built with Bubbletea and Lipgloss wit
   - `x`: Mark task completed (`done`, Tasks view)
   - `b`: Prompt for blocker (automatically sets status to `blocked`, Tasks view)
   - `d`: **Delete task permanently** (prompts for confirmation; blocked if other tasks depend on it, Tasks view)
-  - `/`: Enhanced search & filter across titles, tags, agents, handoffs, and checkpoints
-  - `:`: **Enter Vim Command Mode** (`:tasks`, `:sessions`, `:add`, `:start`, `:done`, `:block`, `:log`, `:tag`, `:dep`, `:edit`, `:del`, `:q`)
+  - `/`: Live interactive filter in bottom status line
+  - `:`: **Enter Vim Command Mode** in bottom status line (`:tasks`, `:sessions`, `:add`, `:start`, `:done`, `:block`, `:log`, `:tag`, `:dep`, `:edit`, `:del`, `:q`)
   - `?`: **Open complete full-screen controls & shortcuts help window**
   - `q` or `Ctrl+C`: Exit TUI
 

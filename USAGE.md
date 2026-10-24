@@ -361,50 +361,54 @@ Full-screen interactive terminal dashboard built with Bubbletea and Lipgloss wit
     - `:del [id]`: Delete task
     - `:help`: Open full help window
 
-#### Editor Integration (`$EDITOR` / `vit`-Style Editing):
-When pressing `a` (create) or `e` (edit), `tm tui` suspends the terminal and opens `$EDITOR` (or `$VISUAL`, defaulting to `vim` / `nano` / `vi`).
+#### Editor Integration (`$EDITOR` / YAML-Formatted Editing):
+When pressing `a` (create) or `e` (edit), `tm tui` suspends the terminal and opens `$EDITOR` (or `$VISUAL`, defaulting to `vim` / `nano` / `vi`) with a temporary `.yaml` file for full syntax highlighting.
 
-In edit mode (`e`), the editor displays **read-only task metadata** at the top, followed by editable task fields, existing observation notes (which can be edited or deleted), and a prompt for adding a new note:
+In edit mode (`e`), the editor displays **read-only task metadata comments** at the top, followed by YAML fields for task attributes, multi-line blocker reason, existing notes, new note, and multi-line description:
 
-```text
+```yaml
 # ==============================================================================
 # READ-ONLY TASK METADATA: Task #1
 # Created: 2026-10-24 10:18:28 | Updated: 2026-10-24 11:02:15
 # Virtual Tags: ACTIVE, READY, UNBLOCKED
 # Dependencies: #2 (completed)
 # ==============================================================================
-# EDITABLE TASK FIELDS (Save and close editor to commit changes)
+# EDITABLE TASK DEFINITION (Save and close editor to commit changes)
 # Valid Statuses: pending, in_progress, blocked, completed, cancelled
 # Valid Priorities: L, M, H, C
-
-Title: Implement multiplication error handling
-Status: in_progress
-Priority: H
-Project: calc
-Tags: math, compiler
-Depends: 2
-Blocker Reason: 
-
+# Multi-line fields (blocker_reason, description, notes): use '|-' format
 # ==============================================================================
-# OBSERVATIONS & NOTES (Edit note text to update, or delete line to remove)
-# Total recorded: 2
-# ==============================================================================
-Note 1: ASan detects heap-use-after-free in parser line 42
-Note 2: Completed reproduction unit test in tests/test_parser.c
 
-# Add a new observation/note to task history upon saving:
-New Note: Found that IEEE 754 overflow traps can be avoided with flag checks
-
-# Everything below 'Description:' will be treated as the task description.
-Description:
-Verify divide-by-zero returns error code and test with ASan.
+title: Implement multiplication error handling
+status: in_progress
+priority: H
+project: calc
+tags:
+  - math
+  - compiler
+depends:
+  - 2
+blocker_reason: |-
+  Waiting on float precision verification.
+  Blocked until libm test suite passes.
+new_note: |-
+  Found that IEEE 754 overflow traps can be avoided with flag checks.
+notes:
+  1: ASan detects heap-use-after-free in parser line 42
+  2: |-
+    Completed reproduction unit test in tests/test_parser.c
+    Verified fix on Linux kernel 6.8.
+description: |-
+  Verify divide-by-zero returns error code and test with ASan.
+  Ensure zero-allocation error path.
 ```
 
 Saving and closing the editor immediately updates the task:
-- Modifying the text of a `Note <id>:` line updates the observation in SQLite and FTS5 search index.
-- Deleting a `Note <id>:` line removes that observation from the database.
-- Entering text under `New Note:` records a new observation timestamped to the current session.
-- Exiting without a title cancels the operation.
+- Modifying the text of a note in the `notes:` map updates the observation in SQLite and the FTS5 search index.
+- Removing an entry from `notes:` deletes that observation.
+- Specifying `blocker_reason:` supports multi-line text (via block scalars `|-`) rendered cleanly in the TUI readonly pane.
+- Specifying `new_note:` records a new observation timestamped to the active session.
+- Exiting with an empty title cancels the operation.
 
 #### Virtual Tags (Taskwarrior-Style):
 `tm` dynamically computes synthetic virtual tags based on task dependencies and state:

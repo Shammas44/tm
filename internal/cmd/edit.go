@@ -68,10 +68,10 @@ var editCmd = &cobra.Command{
 				task.Project = editProject
 			}
 			if cmd.Flags().Changed("desc") {
-				task.Description = editDesc
+				task.Description = strings.ReplaceAll(editDesc, "\\n", "\n")
 			}
 			if cmd.Flags().Changed("block-reason") {
-				task.BlockerReason = editBlockReason
+				task.BlockerReason = strings.ReplaceAll(editBlockReason, "\\n", "\n")
 			}
 			if cmd.Flags().Changed("tags") {
 				var tags []string
@@ -123,7 +123,7 @@ var editCmd = &cobra.Command{
 		allTasks, _ := appStore.ListTasks(ctx, store.TaskFilter{IncludeDeleted: false})
 		obs, _ := appStore.ListObservations(ctx, store.ObservationFilter{TaskID: &task.ID})
 
-		tmpFile, err := os.CreateTemp("", fmt.Sprintf("tm-cli-edit-%d-*.txt", task.ID))
+		tmpFile, err := os.CreateTemp("", fmt.Sprintf("tm-cli-edit-%d-*.yaml", task.ID))
 		if err != nil {
 			return fmt.Errorf("failed to create temp file: %w", err)
 		}

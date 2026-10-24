@@ -99,6 +99,7 @@ var blockCmd = &cobra.Command{
 		}
 
 		reason := strings.Join(args[1:], " ")
+		reason = strings.ReplaceAll(reason, "\\n", "\n")
 		task, err := appStore.GetTask(ctx, id)
 		if err != nil {
 			return fmt.Errorf("failed to get task #%d: %w", id, err)

@@ -78,16 +78,16 @@ func TestParseEditTaskTemplateWithObservations(t *testing.T) {
 	allTasks := []*model.Task{task}
 
 	tmpl := FormatEditTaskTemplate(task, allTasks, obs)
-	if !strings.Contains(tmpl, "Note 1: Valgrind detected 48 bytes unfree") {
-		t.Errorf("expected Note 1 in template")
+	if !strings.Contains(tmpl, "Valgrind detected 48 bytes unfree") {
+		t.Errorf("expected observation 1 in template")
 	}
-	if !strings.Contains(tmpl, "Note 2: Root cause found in pool_release()") {
-		t.Errorf("expected Note 2 in template")
+	if !strings.Contains(tmpl, "Root cause found in pool_release()") {
+		t.Errorf("expected observation 2 in template")
 	}
 
 	// Modify Note 1 and add New Note
-	modifiedInput := strings.Replace(tmpl, "Note 1: Valgrind detected 48 bytes unfree", "Note 1: Valgrind detected 64 bytes unfree in slab_alloc", 1)
-	modifiedInput = strings.Replace(modifiedInput, "New Note: \n", "New Note: Verified with ASan run on Linux\n", 1)
+	modifiedInput := strings.Replace(tmpl, "Valgrind detected 48 bytes unfree", "Valgrind detected 64 bytes unfree in slab_alloc", 1)
+	modifiedInput = strings.Replace(modifiedInput, `new_note: ""`, "new_note: Verified with ASan run on Linux", 1)
 
 	parsed, err := ParseTaskTemplate(modifiedInput)
 	if err != nil {
@@ -105,6 +105,68 @@ func TestParseEditTaskTemplateWithObservations(t *testing.T) {
 	}
 	if parsed.NewNote != "Verified with ASan run on Linux" {
 		t.Errorf("expected new note, got '%s'", parsed.NewNote)
+	}
+}
+
+func TestParseYAMLMultiLineBlockerReasonAndNotes(t *testing.T) {
+	yamlInput := `title: Implement distributed raft consensus
+status: blocked
+priority: C
+project: raft
+tags:
+  - consensus
+  - cluster
+depends:
+  - 101
+  - 102
+blocker_reason: |-
+  Waiting on network partition simulation results.
+  Also blocked by disk sync I/O benchmarks.
+new_note: |-
+  First line of observation.
+  Second line of observation.
+notes:
+  1: |-
+    Multi-line existing note line 1.
+    Multi-line existing note line 2.
+  2: Single line existing note
+description: |-
+  This is a multi-line task description.
+  It details the full Raft state machine.
+`
+
+	parsed, err := ParseTaskTemplate(yamlInput)
+	if err != nil {
+		t.Fatalf("ParseTaskTemplate failed: %v", err)
+	}
+
+	if parsed.Title != "Implement distributed raft consensus" {
+		t.Errorf("expected title, got %q", parsed.Title)
+	}
+	if parsed.Status != model.StatusBlocked {
+		t.Errorf("expected status blocked, got %v", parsed.Status)
+	}
+	if parsed.Priority != model.PriorityCritical {
+		t.Errorf("expected priority C, got %v", parsed.Priority)
+	}
+	expectedBlocker := "Waiting on network partition simulation results.\nAlso blocked by disk sync I/O benchmarks."
+	if parsed.BlockerReason != expectedBlocker {
+		t.Errorf("expected multi-line blocker reason:\n%q\ngot:\n%q", expectedBlocker, parsed.BlockerReason)
+	}
+	expectedNewNote := "First line of observation.\nSecond line of observation."
+	if parsed.NewNote != expectedNewNote {
+		t.Errorf("expected multi-line new note:\n%q\ngot:\n%q", expectedNewNote, parsed.NewNote)
+	}
+	expectedNote1 := "Multi-line existing note line 1.\nMulti-line existing note line 2."
+	if parsed.ExistingNotes[1] != expectedNote1 {
+		t.Errorf("expected note 1:\n%q\ngot:\n%q", expectedNote1, parsed.ExistingNotes[1])
+	}
+	if parsed.ExistingNotes[2] != "Single line existing note" {
+		t.Errorf("expected note 2, got %q", parsed.ExistingNotes[2])
+	}
+	expectedDesc := "This is a multi-line task description.\nIt details the full Raft state machine."
+	if parsed.Description != expectedDesc {
+		t.Errorf("expected description:\n%q\ngot:\n%q", expectedDesc, parsed.Description)
 	}
 }
 

@@ -493,6 +493,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if reason == "" {
 						reason = "Blocked"
 					}
+					reason = strings.ReplaceAll(reason, "\\n", "\n")
 					_ = m.store.UpdateTaskStatus(ctx, t.ID, model.StatusBlocked, reason)
 					m.statusMsg = fmt.Sprintf("Blocked task #%d: %s", t.ID, reason)
 					m.blockInput = ""
@@ -694,7 +695,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) openCreateEditor() (Model, tea.Cmd) {
-	tmpFile, err := os.CreateTemp("", "tm-create-*.txt")
+	tmpFile, err := os.CreateTemp("", "tm-create-*.yaml")
 	if err != nil {
 		m.statusMsg = fmt.Sprintf("Failed to create temporary editor file: %v", err)
 		return m, nil
@@ -725,7 +726,7 @@ func (m Model) openEditEditor(taskID int64) (Model, tea.Cmd) {
 		return m, nil
 	}
 	obs, _ := m.store.ListObservations(ctx, store.ObservationFilter{TaskID: &task.ID})
-	tmpFile, err := os.CreateTemp("", fmt.Sprintf("tm-edit-%d-*.txt", task.ID))
+	tmpFile, err := os.CreateTemp("", fmt.Sprintf("tm-edit-%d-*.yaml", task.ID))
 	if err != nil {
 		m.statusMsg = fmt.Sprintf("Failed to create temporary editor file: %v", err)
 		return m, nil
@@ -853,6 +854,7 @@ func (m Model) executeCommand(cmdStr string) (Model, tea.Cmd) {
 			m.statusMsg = "No task selected."
 			return m, nil
 		}
+		reason = strings.ReplaceAll(reason, "\\n", "\n")
 		if err := m.store.UpdateTaskStatus(ctx, id, model.StatusBlocked, reason); err != nil {
 			m.statusMsg = fmt.Sprintf("Error blocking task #%d: %v", id, err)
 		} else {
@@ -1220,11 +1222,9 @@ func (m Model) View() string {
 	// 6. Requirement 7: Readonly Detail Inspection Pane
 	s.WriteString(m.renderDetailPane())
 
-	// Command Mode Input or Status Message (Controls info bar completely removed)
+	// Command Mode Input (Controls info bar and Status line removed)
 	if m.viewMode == ModeCommand {
 		s.WriteString(cmdPrompt.Render(":") + m.commandInput + "█\n")
-	} else if m.statusMsg != "" {
-		s.WriteString(helpStyle.Render("Status: ") + m.statusMsg + "\n")
 	}
 
 	return s.String()
@@ -1250,9 +1250,18 @@ func (m Model) renderDetailPane() string {
 
 	// 1. Blockers info (Reason + Incomplete Prerequisite Tasks) - no duplicate metadata
 	hasBlockers := false
-	if t.BlockerReason != "" {
+	if strings.TrimSpace(t.BlockerReason) != "" {
 		hasBlockers = true
-		allLines = append(allLines, blockedStyle.Render("  ⚠ Blocker Reason: ")+t.BlockerReason)
+		reason := strings.TrimSpace(t.BlockerReason)
+		if strings.Contains(reason, "\n") {
+			allLines = append(allLines, blockedStyle.Render("  Blocker Reason:"))
+			reasonWrapped := wrapText(reason, max(30, m.width-6), "    ")
+			for _, rl := range reasonWrapped {
+				allLines = append(allLines, rl)
+			}
+		} else {
+			allLines = append(allLines, blockedStyle.Render("  Blocker Reason: ")+reason)
+		}
 	}
 
 	if len(t.Dependencies) > 0 {
@@ -1273,7 +1282,7 @@ func (m Model) renderDetailPane() string {
 		}
 		if len(blockingDeps) > 0 {
 			hasBlockers = true
-			allLines = append(allLines, blockedStyle.Render("  ⚠ Blocked by Prerequisite: ")+strings.Join(blockingDeps, ", "))
+			allLines = append(allLines, blockedStyle.Render("  Blocked by Prerequisite: ")+strings.Join(blockingDeps, ", "))
 		} else if t.Status == model.StatusPending && !hasBlockers {
 			allLines = append(allLines, completedStyle.Render("  ✓ All prerequisites completed (Ready to start)"))
 		}

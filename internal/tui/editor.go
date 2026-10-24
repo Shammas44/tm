@@ -1,13 +1,13 @@
 package tui
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 
+	"gopkg.in/yaml.v3"
 	"taskmanager/internal/model"
 )
 
@@ -24,30 +24,53 @@ type ParsedTask struct {
 	ExistingNotes map[int64]string // parsed existing notes (id -> content)
 }
 
+type newTaskYAMLData struct {
+	Title         string   `yaml:"title"`
+	Priority      string   `yaml:"priority"`
+	Project       string   `yaml:"project"`
+	Tags          []string `yaml:"tags"`
+	Depends       []int64  `yaml:"depends"`
+	BlockerReason string   `yaml:"blocker_reason"`
+	NewNote       string   `yaml:"new_note"`
+	Description   string   `yaml:"description"`
+}
+
+type editTaskYAMLData struct {
+	Title         string           `yaml:"title"`
+	Status        string           `yaml:"status"`
+	Priority      string           `yaml:"priority"`
+	Project       string           `yaml:"project"`
+	Tags          []string         `yaml:"tags"`
+	Depends       []int64          `yaml:"depends"`
+	BlockerReason string           `yaml:"blocker_reason"`
+	NewNote       string           `yaml:"new_note"`
+	Notes         map[int64]string `yaml:"notes,omitempty"`
+	Description   string           `yaml:"description"`
+}
+
 func FormatNewTaskTemplate(defaultProject string) string {
+	data := newTaskYAMLData{
+		Title:         "",
+		Priority:      "M",
+		Project:       defaultProject,
+		Tags:          []string{},
+		Depends:       []int64{},
+		BlockerReason: "",
+		NewNote:       "",
+		Description:   "",
+	}
+
+	yamlBytes, _ := yaml.Marshal(&data)
+
 	var sb strings.Builder
 	sb.WriteString("# ==============================================================================\n")
-	sb.WriteString("# TaskManager: Create New Task (vit-style editor)\n")
+	sb.WriteString("# TaskManager: Create New Task (YAML Format)\n")
 	sb.WriteString("# Lines starting with '#' are comments and will be ignored.\n")
-	sb.WriteString("# Save and close the editor to create the task.\n")
 	sb.WriteString("# Valid Priorities: L, M, H, C\n")
+	sb.WriteString("# Multi-line fields (blocker_reason, description): use '|-' followed by indented lines.\n")
+	sb.WriteString("# Save and close the editor to create the task.\n")
 	sb.WriteString("# ==============================================================================\n\n")
-	sb.WriteString("Title: \n")
-	sb.WriteString("Priority: M\n")
-	if defaultProject != "" {
-		sb.WriteString(fmt.Sprintf("Project: %s\n", defaultProject))
-	} else {
-		sb.WriteString("Project: \n")
-	}
-	sb.WriteString("Tags: \n")
-	sb.WriteString("Depends: \n")
-	sb.WriteString("Blocker Reason: \n")
-	sb.WriteString("\n")
-	sb.WriteString("# Optional: Enter an initial observation or technical note below:\n")
-	sb.WriteString("New Note: \n")
-	sb.WriteString("\n")
-	sb.WriteString("# Everything below 'Description:' will be treated as the task description.\n")
-	sb.WriteString("Description:\n")
+	sb.Write(yamlBytes)
 	return sb.String()
 }
 
@@ -80,51 +103,41 @@ func FormatEditTaskTemplate(t *model.Task, allTasks []*model.Task, observations 
 		sb.WriteString(fmt.Sprintf("# Dependencies: %s\n", strings.Join(depStrs, ", ")))
 	}
 	sb.WriteString("# ==============================================================================\n")
-	sb.WriteString("# EDITABLE TASK FIELDS (Save and close editor to commit changes)\n")
+	sb.WriteString("# EDITABLE TASK DEFINITION (Save and close editor to commit changes)\n")
 	sb.WriteString("# Valid Statuses: pending, in_progress, blocked, completed, cancelled\n")
-	sb.WriteString("# Valid Priorities: L, M, H, C\n\n")
+	sb.WriteString("# Valid Priorities: L, M, H, C\n")
+	sb.WriteString("# Multi-line fields (blocker_reason, description, notes): use '|-' format\n")
+	sb.WriteString("# ==============================================================================\n\n")
 
-	sb.WriteString(fmt.Sprintf("Title: %s\n", t.Title))
-	sb.WriteString(fmt.Sprintf("Status: %s\n", t.Status))
-	sb.WriteString(fmt.Sprintf("Priority: %s\n", t.Priority))
-	sb.WriteString(fmt.Sprintf("Project: %s\n", t.Project))
-	sb.WriteString(fmt.Sprintf("Tags: %s\n", strings.Join(t.Tags, ", ")))
-
-	var depList []string
-	for _, d := range t.Dependencies {
-		depList = append(depList, strconv.FormatInt(d, 10))
-	}
-	sb.WriteString(fmt.Sprintf("Depends: %s\n", strings.Join(depList, ", ")))
-	sb.WriteString(fmt.Sprintf("Blocker Reason: %s\n", t.BlockerReason))
-	sb.WriteString("\n")
-
-	sb.WriteString("# ==============================================================================\n")
-	sb.WriteString("# OBSERVATIONS & NOTES (Edit note text to update, or delete line to remove)\n")
-	sb.WriteString(fmt.Sprintf("# Total recorded: %d\n", len(observations)))
-	sb.WriteString("# ==============================================================================\n")
+	notesMap := make(map[int64]string)
 	for _, o := range observations {
-		contentTrimmed := strings.TrimSpace(o.Content)
-		lines := strings.Split(contentTrimmed, "\n")
-		if len(lines) == 0 {
-			continue
-		}
-		sb.WriteString(fmt.Sprintf("Note %d: %s\n", o.ID, lines[0]))
-		for _, subLine := range lines[1:] {
-			sb.WriteString(fmt.Sprintf("  %s\n", subLine))
-		}
+		notesMap[o.ID] = o.Content
 	}
-	sb.WriteString("\n")
-	sb.WriteString("# Add a new observation/note to task history upon saving (multi-line supported):\n")
-	sb.WriteString("New Note: \n")
-	sb.WriteString("\n")
-	sb.WriteString("# Everything below 'Description:' will be treated as the task description.\n")
-	sb.WriteString("Description:\n")
-	if t.Description != "" {
-		sb.WriteString(t.Description)
-		if !strings.HasSuffix(t.Description, "\n") {
-			sb.WriteString("\n")
-		}
+
+	tags := t.Tags
+	if tags == nil {
+		tags = []string{}
 	}
+	deps := t.Dependencies
+	if deps == nil {
+		deps = []int64{}
+	}
+
+	data := editTaskYAMLData{
+		Title:         t.Title,
+		Status:        string(t.Status),
+		Priority:      string(t.Priority),
+		Project:       t.Project,
+		Tags:          tags,
+		Depends:       deps,
+		BlockerReason: t.BlockerReason,
+		NewNote:       "",
+		Notes:         notesMap,
+		Description:   t.Description,
+	}
+
+	yamlBytes, _ := yaml.Marshal(&data)
+	sb.Write(yamlBytes)
 	return sb.String()
 }
 
@@ -136,8 +149,127 @@ func ParseTaskTemplate(content string) (ParsedTask, error) {
 	res.Dependencies = []int64{}
 	res.ExistingNotes = make(map[int64]string)
 
-	scanner := bufio.NewScanner(strings.NewReader(content))
+	type rawYAML struct {
+		Title         string         `yaml:"title"`
+		Status        string         `yaml:"status"`
+		Priority      string         `yaml:"priority"`
+		Project       string         `yaml:"project"`
+		Tags          any            `yaml:"tags"`
+		Depends       any            `yaml:"depends"`
+		BlockerReason string         `yaml:"blocker_reason"`
+		NewNote       string         `yaml:"new_note"`
+		Notes         map[any]string `yaml:"notes"`
+		Description   string         `yaml:"description"`
+	}
 
+	var raw rawYAML
+	err := yaml.Unmarshal([]byte(content), &raw)
+	if err == nil && (raw.Title != "" || raw.Status != "" || raw.Project != "" || len(raw.Notes) > 0 || raw.Description != "") {
+		res.Title = strings.TrimSpace(raw.Title)
+		if raw.Status != "" {
+			valLower := strings.ToLower(strings.TrimSpace(raw.Status))
+			if valLower == "active" {
+				valLower = "in_progress"
+			}
+			res.Status = model.TaskStatus(valLower)
+		}
+		if raw.Priority != "" {
+			prio := model.TaskPriority(strings.ToUpper(strings.TrimSpace(raw.Priority)))
+			switch prio {
+			case model.PriorityLow, model.PriorityMedium, model.PriorityHigh, model.PriorityCritical:
+				res.Priority = prio
+			}
+		}
+		res.Project = strings.TrimSpace(raw.Project)
+		res.BlockerReason = strings.TrimSpace(raw.BlockerReason)
+		res.NewNote = strings.TrimSpace(raw.NewNote)
+		res.Description = strings.TrimSpace(raw.Description)
+
+		// Parse tags (support list of strings or comma/space separated string)
+		if raw.Tags != nil {
+			switch tv := raw.Tags.(type) {
+			case []any:
+				for _, itm := range tv {
+					tStr := strings.TrimSpace(strings.TrimPrefix(fmt.Sprint(itm), "+"))
+					if tStr != "" {
+						res.Tags = append(res.Tags, tStr)
+					}
+				}
+			case []string:
+				for _, itm := range tv {
+					tStr := strings.TrimSpace(strings.TrimPrefix(itm, "+"))
+					if tStr != "" {
+						res.Tags = append(res.Tags, tStr)
+					}
+				}
+			case string:
+				parts := strings.FieldsFunc(tv, func(r rune) bool {
+					return r == ',' || r == ' ' || r == '\t'
+				})
+				for _, itm := range parts {
+					tStr := strings.TrimSpace(strings.TrimPrefix(itm, "+"))
+					if tStr != "" {
+						res.Tags = append(res.Tags, tStr)
+					}
+				}
+			}
+		}
+
+		// Parse depends (support list of ints/strings or comma separated string)
+		if raw.Depends != nil {
+			switch dv := raw.Depends.(type) {
+			case []any:
+				for _, itm := range dv {
+					clean := strings.TrimSpace(strings.TrimPrefix(fmt.Sprint(itm), "#"))
+					if id, err := strconv.ParseInt(clean, 10, 64); err == nil {
+						res.Dependencies = append(res.Dependencies, id)
+					}
+				}
+			case []int:
+				for _, itm := range dv {
+					res.Dependencies = append(res.Dependencies, int64(itm))
+				}
+			case []int64:
+				res.Dependencies = append(res.Dependencies, dv...)
+			case string:
+				parts := strings.FieldsFunc(dv, func(r rune) bool {
+					return r == ',' || r == ' ' || r == '\t'
+				})
+				for _, itm := range parts {
+					clean := strings.TrimSpace(strings.TrimPrefix(itm, "#"))
+					if id, err := strconv.ParseInt(clean, 10, 64); err == nil {
+						res.Dependencies = append(res.Dependencies, id)
+					}
+				}
+			}
+		}
+
+		// Parse notes
+		if raw.Notes != nil {
+			for k, v := range raw.Notes {
+				kClean := strings.TrimSpace(strings.TrimPrefix(fmt.Sprint(k), "#"))
+				if id, err := strconv.ParseInt(kClean, 10, 64); err == nil {
+					res.ExistingNotes[id] = strings.TrimSpace(v)
+				}
+			}
+		}
+
+		return res, nil
+	}
+
+	// Fallback legacy line-by-line parser if input is not standard YAML
+	return parseLegacyTaskTemplate(content)
+}
+
+func parseLegacyTaskTemplate(content string) (ParsedTask, error) {
+	var res ParsedTask
+	res.Priority = model.PriorityMedium
+	res.Status = model.StatusPending
+	res.Tags = []string{}
+	res.Dependencies = []int64{}
+	res.ExistingNotes = make(map[int64]string)
+
+	lines := strings.Split(content, "\n")
 	type parseState int
 	const (
 		stateHeader parseState = iota
@@ -151,8 +283,7 @@ func ParseTaskTemplate(content string) (ParsedTask, error) {
 	var newNoteLines []string
 	var descLines []string
 
-	for scanner.Scan() {
-		line := scanner.Text()
+	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 
 		if curState == stateInDescription {
@@ -163,7 +294,6 @@ func ParseTaskTemplate(content string) (ParsedTask, error) {
 			continue
 		}
 
-		// Comment lines outside description
 		if strings.HasPrefix(trimmed, "#") {
 			if curState == stateInNewNote || curState == stateInNote {
 				curState = stateHeader
@@ -182,7 +312,6 @@ func ParseTaskTemplate(content string) (ParsedTask, error) {
 			continue
 		}
 
-		// Check if line enters Description:
 		if strings.EqualFold(trimmed, "description:") || strings.HasPrefix(strings.ToLower(trimmed), "description:") {
 			curState = stateInDescription
 			currentNoteID = 0
@@ -193,7 +322,6 @@ func ParseTaskTemplate(content string) (ParsedTask, error) {
 			continue
 		}
 
-		// Check if line starts New Note: or New Observation:
 		if strings.HasPrefix(strings.ToLower(trimmed), "new note:") || strings.HasPrefix(strings.ToLower(trimmed), "new observation:") {
 			curState = stateInNewNote
 			currentNoteID = 0
@@ -205,7 +333,6 @@ func ParseTaskTemplate(content string) (ParsedTask, error) {
 			continue
 		}
 
-		// Check if line starts Note <id>: or Observation <id>:
 		lower := strings.ToLower(trimmed)
 		if (strings.HasPrefix(lower, "note ") || strings.HasPrefix(lower, "observation ")) && strings.Contains(line, ":") {
 			colonIdx := strings.Index(line, ":")
@@ -222,7 +349,6 @@ func ParseTaskTemplate(content string) (ParsedTask, error) {
 			}
 		}
 
-		// Check if continuation line of current existing note
 		if curState == stateInNote && currentNoteID > 0 {
 			if strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t") || !strings.Contains(line, ":") {
 				if res.ExistingNotes[currentNoteID] == "" {
@@ -237,7 +363,6 @@ func ParseTaskTemplate(content string) (ParsedTask, error) {
 			}
 		}
 
-		// Check if continuation line of New Note:
 		if curState == stateInNewNote {
 			if strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t") || !strings.Contains(line, ":") {
 				newNoteLines = append(newNoteLines, trimmed)
@@ -247,7 +372,6 @@ func ParseTaskTemplate(content string) (ParsedTask, error) {
 			}
 		}
 
-		// Key-Value field parsing
 		colonIdx := strings.Index(line, ":")
 		if colonIdx == -1 {
 			continue
@@ -315,24 +439,18 @@ func ResolveEditorCommand(filePath string) *exec.Cmd {
 		editor = os.Getenv("VISUAL")
 	}
 	if editor == "" {
-		if _, err := exec.LookPath("vim"); err == nil {
-			editor = "vim"
-		} else if _, err := exec.LookPath("nano"); err == nil {
-			editor = "nano"
-		} else {
-			editor = "vi"
+		for _, candidate := range []string{"vim", "nano", "vi"} {
+			if path, err := exec.LookPath(candidate); err == nil {
+				editor = path
+				break
+			}
 		}
+	}
+	if editor == "" {
+		editor = "vim"
 	}
 
 	parts := strings.Fields(editor)
-	if len(parts) == 0 {
-		return exec.Command("vi", filePath)
-	}
-
-	args := append(parts[1:], filePath)
-	cmd := exec.Command(parts[0], args...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd
+	parts = append(parts, filePath)
+	return exec.Command(parts[0], parts[1:]...)
 }

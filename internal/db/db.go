@@ -42,6 +42,10 @@ func Open(dbPath string) (*sql.DB, error) {
 	_, _ = db.Exec("ALTER TABLE tasks ADD COLUMN dependencies TEXT DEFAULT '[]'")
 	_, _ = db.Exec("ALTER TABLE tasks ADD COLUMN blocker TEXT DEFAULT ''")
 	_, _ = db.Exec("UPDATE tasks SET blocker = blocker_reason WHERE (blocker = '' OR blocker IS NULL) AND (blocker_reason != '' AND blocker_reason IS NOT NULL)")
+	_, _ = db.Exec("ALTER TABLE sessions ADD COLUMN checkpoint TEXT DEFAULT ''")
+	_, _ = db.Exec("ALTER TABLE sessions ADD COLUMN handoff TEXT DEFAULT ''")
+	_, _ = db.Exec("CREATE INDEX IF NOT EXISTS idx_sessions_started ON sessions(started_at DESC)")
+	_, _ = db.Exec("UPDATE sessions SET handoff = summary WHERE (handoff = '' OR handoff IS NULL) AND (summary != '' AND summary IS NOT NULL)")
 
 	return db, nil
 }

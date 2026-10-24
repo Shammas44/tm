@@ -27,6 +27,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     agent_id TEXT DEFAULT 'developer',
     active_task_id INTEGER REFERENCES tasks(id),
     status TEXT NOT NULL CHECK(status IN ('active', 'completed', 'interrupted')),
+    checkpoint TEXT DEFAULT '',
+    handoff TEXT DEFAULT '',
     summary TEXT DEFAULT '',
     next_action TEXT DEFAULT '',
     last_checkpoint_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -35,6 +37,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
+CREATE INDEX IF NOT EXISTS idx_sessions_started ON sessions(started_at DESC);
 
 CREATE TABLE IF NOT EXISTS observations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

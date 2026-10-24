@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -16,6 +17,14 @@ type StatusResponse struct {
 	Blockers           []string            `json:"blockers"`
 	RecentObservations []string            `json:"recent_observations"`
 	Backlog            store.BacklogCounts `json:"backlog"`
+}
+
+func (r StatusResponse) LastHandoffString() (string, bool) {
+	if r.LastSession == nil || r.LastSession.Handoff == nil {
+		return "", false
+	}
+	str, ok := r.LastSession.Handoff.(string)
+	return str, ok
 }
 
 var statusCmd = &cobra.Command{
@@ -88,14 +97,25 @@ var statusCmd = &cobra.Command{
 		if resp.ActiveSession != nil {
 			fmt.Fprintf(cmd.OutOrStdout(), "Active Session: %s (agent: %s, started: %s)\n",
 				resp.ActiveSession.ID, resp.ActiveSession.AgentID, resp.ActiveSession.StartedAt.Local().Format("2006-01-02 15:04:05"))
-			if resp.ActiveSession.Summary != "" {
-				fmt.Fprintf(cmd.OutOrStdout(), "  Last Checkpoint: %s\n", resp.ActiveSession.Summary)
+			chk := resp.ActiveSession.Checkpoint
+			if chk == "" {
+				chk = resp.ActiveSession.Summary
+			}
+			if chk != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "  Last Checkpoint: %s\n", chk)
 			}
 		} else if resp.LastSession != nil {
 			statusStr := string(resp.LastSession.Status)
 			fmt.Fprintf(cmd.OutOrStdout(), "Last Session: %s [%s] (agent: %s)\n",
 				resp.LastSession.ID, statusStr, resp.LastSession.AgentID)
-			if resp.LastSession.Summary != "" {
+			if resp.LastSession.Handoff != nil {
+				if str, ok := resp.LastHandoffString(); ok && str != "" {
+					fmt.Fprintf(cmd.OutOrStdout(), "  Last Handoff: %s\n", str)
+				} else {
+					pretty, _ := json.MarshalIndent(resp.LastSession.Handoff, "  ", "  ")
+					fmt.Fprintf(cmd.OutOrStdout(), "  Last Handoff (JSON):\n  %s\n", string(pretty))
+				}
+			} else if resp.LastSession.Summary != "" {
 				fmt.Fprintf(cmd.OutOrStdout(), "  Last Handoff: %s\n", resp.LastSession.Summary)
 			}
 		} else {

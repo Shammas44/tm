@@ -130,17 +130,26 @@ Full-text search across all historical task logs, observations, and findings.
 ---
 
 ### Command 6: `tm handoff` (Optional)
-Cleanly concludes the current session.
+Cleanly concludes the current session, supporting both **plain text** and **structured JSON**.
 
-* **Usage**: `tm handoff "<summary>" [next:"<recommended next action>"] [--json]`
+* **Usage**: `tm handoff [note or JSON] [--file <path>] [--json]`
 * **Behavior**:
   1. Marks the active session as `completed`.
-  2. Saves `summary` and `next_action`.
-* **Note**: If the agent does not call this (e.g. process terminated, timeout, token limit), `tm init` automatically handles recovery without crashing or deadlocking.
+  2. Saves polymorphic `handoff` payload (parsed dynamically as typed JSON object or plain text).
+* **Note**: If the agent does not call this (e.g. process terminated, timeout, token limit), `tm init` automatically handles recovery from the last checkpoint without crashing or deadlocking.
 
 ---
 
-### Command 7: `tm tui`
+### Command 7: `tm session` / `tm sessions`
+Inspect past sessions, audit interrupted runs, and view historical handoffs, observations, and tasks touched.
+
+* **Usage**:
+  - `tm session [list] [--limit <n>] [--json]`: Chronological table of sessions with duration, status, and handoff.
+  - `tm session show <id>` (or `tm session <id|prefix>`): Detailed session inspection with prefix matching, observations recorded in that session, and tasks touched.
+
+---
+
+### Command 8: `tm tui`
 Interactive full-screen terminal dashboard for developers with a `vit`-inspired editor workflow.
 
 * **Built with**: `charmbracelet/bubbletea` and `lipgloss`.
@@ -182,12 +191,17 @@ CREATE TABLE IF NOT EXISTS sessions (
     agent_id TEXT DEFAULT 'developer',
     active_task_id INTEGER REFERENCES tasks(id),
     status TEXT NOT NULL CHECK(status IN ('active', 'completed', 'interrupted')),
+    checkpoint TEXT DEFAULT '',
+    handoff TEXT DEFAULT '',
     summary TEXT DEFAULT '',
     next_action TEXT DEFAULT '',
     last_checkpoint_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     ended_at TIMESTAMP
 );
+
+CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
+CREATE INDEX IF NOT EXISTS idx_sessions_started ON sessions(started_at DESC);
 
 CREATE TABLE IF NOT EXISTS observations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -65,10 +65,16 @@ make build-linux   # Static Linux binary at bin/tm-linux-amd64 (CGO_ENABLED=0)
 ./bin/tm search "division"
 ./bin/tm 1 done
 
-# 6. Record clean handoff
-./bin/tm handoff "Completed division error codes" next:"Write unit tests"
+# 6. Record clean handoff (plain text or structured JSON)
+./bin/tm handoff '{"summary": "Completed division error codes", "next": "Write unit tests"}'
 
-# 7. Launch interactive terminal UI
+# 7. Query project state (read-only without starting a session)
+./bin/tm status
+
+# 8. Inspect past sessions, notes, and duration
+./bin/tm session
+
+# 9. Launch interactive terminal UI
 ./bin/tm tui
 ```
 

@@ -198,7 +198,11 @@ Initializes a new session, auto-detects crashed or interrupted sessions, and res
   {
     "session_id": "c7a8e120-d3b0-477b-8c03-4019dc61a020",
     "resumed_from_interrupt": false,
-    "last_handoff": "Implemented calc_divide, need to write edge-case unit tests.",
+    "last_checkpoint": "Task #1 note: Identified memory leak in slab allocator",
+    "last_handoff": {
+      "summary": "Implemented calc_divide, need to write edge-case unit tests.",
+      "files_modified": ["calc.c", "calc_test.c"]
+    },
     "active_task": {
       "id": 1,
       "title": "Implement division error handling",
@@ -219,6 +223,7 @@ Initializes a new session, auto-detects crashed or interrupted sessions, and res
     }
   }
   ```
+  *(Note: `last_handoff` dynamically serializes as either a typed JSON object or a string depending on how it was passed).*
 
 ---
 
@@ -304,15 +309,43 @@ Performs BM25-ranked full-text search across all notes, discoveries, and observa
 ---
 
 ### `tm handoff` (Optional)
-Concludes the active session cleanly and declares next steps.
+Concludes the active session cleanly and declares next steps, supporting both **plain text** and **structured JSON**.
 
-* **Usage:** `tm handoff "<summary>" [next:"<action>"] [--json]`
-* **Example:**
+* **Usage:** `tm handoff [note or JSON] [--file <path>] [--json]`
+* **Examples:**
   ```bash
-  tm handoff "Completed parser unit tests" next:"Implement AST evaluator"
+  # Plain text handoff (human engineer)
+  tm handoff "Completed parser unit tests, ready for AST evaluator"
+
+  # Structured JSON handoff (AI agent)
+  tm handoff '{"summary": "Parser tests pass", "files": ["parser.go"], "next": "evaluator"}'
+
+  # File-based handoff (large context payload)
+  tm handoff --file handoff.json
   ```
 > [!NOTE]
 > If an agent fails to call `tm handoff` (e.g. process killed, timeout, token exhaustion), `tm init` automatically recovers the in-progress task and latest checkpoint without data loss or deadlocks.
+
+---
+
+### `tm session` / `tm sessions`
+Inspect past sessions, audit interrupted runs, and review historical handoffs, observations, and tasks touched.
+
+* **List Sessions:** `tm session [list] [--limit <n>] [--json]`
+  ```bash
+  tm session
+  tm sessions --limit 10
+  tm session --json
+  ```
+  *Output table displays:* `Session` (short 8-char ID), `Status` (`active`, `completed`, `interrupted`), `Agent`, `Started`, `Duration`, and `Handoff / Last Activity`.
+
+* **Inspect Specific Session Details:** `tm session show <id>` (or `tm session <id|prefix>`)
+  ```bash
+  # Prefix matching supported (like Git commit hashes)
+  tm session 80ed5772
+  tm session show 80ed5772-3a0c-42c4-8f73-668fe1486ab9 --json
+  ```
+  *Output displays:* Full session UUID, agent ID, status, start/end timestamps, duration, active task, checkpoint, handoff (formatted JSON or text), list of observations recorded during that specific session, and list of tasks touched.
 
 ---
 

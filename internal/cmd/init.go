@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -14,7 +15,8 @@ var initAgentID string
 type InitResponse struct {
 	SessionID            string              `json:"session_id"`
 	ResumedFromInterrupt bool                `json:"resumed_from_interrupt"`
-	LastHandoff          string              `json:"last_handoff,omitempty"`
+	LastCheckpoint       string              `json:"last_checkpoint,omitempty"`
+	LastHandoff          any                 `json:"last_handoff,omitempty"`
 	ActiveTask           *model.Task         `json:"active_task"`
 	Blockers             []string            `json:"blockers"`
 	RecentObservations   []string            `json:"recent_observations"`
@@ -36,17 +38,24 @@ var initCmd = &cobra.Command{
 		activeSession, err := appStore.GetActiveSession(ctx)
 		if err == nil && activeSession != nil {
 			resp.ResumedFromInterrupt = true
-			if activeSession.Summary != "" {
-				resp.LastHandoff = activeSession.Summary
+			if activeSession.Checkpoint != "" {
+				resp.LastCheckpoint = activeSession.Checkpoint
+			} else if activeSession.Summary != "" {
+				resp.LastCheckpoint = activeSession.Summary
 			} else {
-				resp.LastHandoff = fmt.Sprintf("Interrupted session %s", activeSession.ID[:8])
+				resp.LastCheckpoint = fmt.Sprintf("Interrupted session %s", activeSession.ID[:8])
 			}
+			resp.LastHandoff = resp.LastCheckpoint // backward-compatible fallback
 			_ = appStore.MarkInterrupted(ctx, activeSession.ID)
 		} else {
-			// Check last closed session for handoff summary
+			// Check last closed session for handoff
 			lastSession, err := appStore.GetLastSession(ctx)
-			if err == nil && lastSession != nil && lastSession.Summary != "" {
-				resp.LastHandoff = lastSession.Summary
+			if err == nil && lastSession != nil {
+				if lastSession.Handoff != nil {
+					resp.LastHandoff = lastSession.Handoff
+				} else if lastSession.Summary != "" {
+					resp.LastHandoff = lastSession.Summary
+				}
 			}
 		}
 
@@ -108,9 +117,14 @@ var initCmd = &cobra.Command{
 		fmt.Fprintln(cmd.OutOrStdout(), "=== TaskManager Session Initialized ===")
 		fmt.Fprintf(cmd.OutOrStdout(), "Session ID: %s\n", resp.SessionID)
 		if resp.ResumedFromInterrupt {
-			fmt.Fprintf(cmd.OutOrStdout(), "[RECOVERED FROM INTERRUPT] Last checkpoint: %s\n", resp.LastHandoff)
-		} else if resp.LastHandoff != "" {
-			fmt.Fprintf(cmd.OutOrStdout(), "[LAST HANDOFF] %s\n", resp.LastHandoff)
+			fmt.Fprintf(cmd.OutOrStdout(), "[RECOVERED FROM INTERRUPT] Last checkpoint: %s\n", resp.LastCheckpoint)
+		} else if resp.LastHandoff != nil {
+			if str, ok := resp.LastHandoff.(string); ok && str != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "[LAST HANDOFF] %s\n", str)
+			} else {
+				prettyJSON, _ := json.MarshalIndent(resp.LastHandoff, "  ", "  ")
+				fmt.Fprintf(cmd.OutOrStdout(), "[LAST HANDOFF (JSON)]\n  %s\n", string(prettyJSON))
+			}
 		}
 
 		if resp.ActiveTask != nil {

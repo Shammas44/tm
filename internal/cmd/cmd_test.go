@@ -256,4 +256,20 @@ func TestCLICommandsEndToEnd(t *testing.T) {
 	if richTask.ID != 1 || len(richTask.Observations) == 0 {
 		t.Errorf("expected task #1 with observations, got %+v", richTask)
 	}
+
+	// 12. Query Project Status (read-only without initiating a session)
+	out, err = runCmd("status")
+	if err != nil {
+		t.Fatalf("tm status failed: %v, out: %s", err, out)
+	}
+	var statusRes StatusResponse
+	if err := json.Unmarshal([]byte(out), &statusRes); err != nil {
+		t.Fatalf("failed to parse JSON from status output: %v (raw: %s)", err, out)
+	}
+	if statusRes.Backlog.Completed != 1 {
+		t.Errorf("expected 1 completed task in backlog, got %+v", statusRes.Backlog)
+	}
+	if len(statusRes.RecentObservations) == 0 {
+		t.Errorf("expected recent observations in status, got %+v", statusRes.RecentObservations)
+	}
 }

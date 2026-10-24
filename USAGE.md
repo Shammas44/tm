@@ -222,6 +222,23 @@ Initializes a new session, auto-detects crashed or interrupted sessions, and res
 
 ---
 
+### `tm status` / `tm state` / `tm info`
+Queries the complete state of the project (active session, active task, blockers, recent observations, and backlog counts) purely **read-only without initiating a new session** or modifying any database records.
+
+* **Usage:** `tm status [--json] [-P <project>]`
+* **Aliases:** `tm state`, `tm info`, `tm st`
+* **Examples:**
+  ```bash
+  tm status
+  tm status --json
+  tm status -P compiler
+  ```
+* **Output Format:**
+  - In a terminal: Prints active/last session details, current active task, open blockers, recent observations, and backlog counts.
+  - With `--json`: Returns compact JSON containing `active_session` (or `last_session`), `active_task`, `blockers`, `recent_observations`, and `backlog`.
+
+---
+
 ### `tm add` / `tm new`
 Creates a new task in the backlog.
 

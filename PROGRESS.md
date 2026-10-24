@@ -1,100 +1,68 @@
-# Implementation Progress: TaskManager MCP Server
+# Implementation Progress: TaskManager CLI (Go Rewrite)
 
-This document tracks implementation progress across all engineering slices defined in [ROADMAP.md](file:///Users/sebastientraber/Documents/Prog/sandbox/taskmanager/repo/ROADMAP.md).
-
-> [!NOTE]
-> The JWT Auth MCP is deferred to a dedicated subsequent project. TaskManager MCP implementation includes embedded test token utilities for testing and development.
+This document tracks implementation progress across all engineering slices defined in [ROADMAP.md](ROADMAP.md) and specified in [SPECIFICATION.md](SPECIFICATION.md).
 
 **Legend:**
 - `[ ]` Not started
 - `[/]` In progress
-- `[x]` Completed & verified with tests
+- `[x]` Completed & verified with automated tests
 
 ---
 
-## Phase 1: Environment & Project Scaffolding
-- [x] **Slice 1.1: Project Scaffolding & Toolchain Configuration**
-  - [x] Initialize Python 3.12+ project with `uv` / `pyproject.toml`
-  - [x] Configure `pyproject.toml` with `mcp`, `pydantic>=2.7`, `aiosqlite`, `pyjwt[crypto]`, `cryptography`, `structlog`
-  - [x] Configure `ruff` (linting & formatting) and `pytest` with async support
-- [x] **Slice 1.2: Shared Error Envelopes & Diagnostics**
-  - [x] Implement domain exception hierarchy (`TaskManagerError`, `InvariantViolationError`, etc.)
-  - [x] Implement MCP JSON-RPC 2.0 error data payload serializer
-  - [x] Configure stderr-only structured logger (preserving stdout for stdio transport)
+## Phase 1: Go Project Skeleton & SQLite Storage Engine
+- [x] **Slice 1.1: Project Setup & Dependencies**
+  - [x] Initialize Go module (`go.mod`) with pure Go dependencies (`modernc.org/sqlite`, `spf13/cobra`, `lipgloss`, `bubbletea`).
+  - [x] Standardize directory layout (`cmd/tm/main.go`, `internal/cmd/`, `internal/db/`, `internal/store/`, `internal/model/`, `internal/output/`, `internal/tui/`).
+  - [x] Verified zero CGO static compilation (`CGO_ENABLED=0`).
+- [x] **Slice 1.2: Database Migration & Storage Engine**
+  - [x] Implement `internal/db/db.go` with `PRAGMA journal_mode=WAL`, `PRAGMA busy_timeout=5000`, `PRAGMA foreign_keys=ON`.
+  - [x] Implement schema migrations (`internal/db/schema.sql`): `tasks`, `sessions`, `observations`, `observations_fts` (FTS5).
+  - [x] Implement FTS5 triggers for automatic synchronization.
+  - [x] Automated unit test suite in `internal/db/db_test.go`.
+- [x] **Slice 1.3: Data Access Layer (CRUD & FTS5)**
+  - [x] Implement `internal/store/task_store.go`: auto-increment integer IDs, status transitions, active task management, backlog counts.
+  - [x] Implement `internal/store/observation_store.go`: timestamped observations, FTS5 BM25 search.
+  - [x] Implement `internal/store/session_store.go`: session lifecycle, checkpoints, interruption marking.
+  - [x] Automated concurrent access and CRUD test suite in `internal/store/store_test.go`.
 
 ---
 
-## Phase 2: Storage & Persistence Foundations
-- [x] **Slice 2.1: Hermetic Taskwarrior Subprocess Bridge**
-  - [x] Implement project-sandboxed `taskrc` and `data.location` initialization
-  - [x] Register agent UDAs (`uuid`, `component`, `confidence`, `estimate_minutes`, `evidence`)
-  - [x] Implement cross-process file locking (`fcntl.flock` on `session.lock`)
-  - [x] Implement asynchronous CLI wrapper (`task rc:<path> export`)
-  - [x] Enforce strict mapping to immutable **UUIDv4** across all public interfaces
-- [x] **Slice 2.2: SQLite Memory & Knowledge Store**
-  - [x] Initialize `memory.db` with WAL mode
-  - [x] Implement schema for `sessions`, `observations`, `blockers`, `audit_log`, `reflections`
-  - [x] Configure `observations_fts` (SQLite FTS5 virtual table with BM25 ranking)
-  - [x] Implement FTS synchronization triggers (insert, update, delete)
+## Phase 2: Core Taskwarrior-Style CLI Commands & Output Formatter
+- [x] **Slice 2.1: Dual Output Formatter (Human TTY vs. Machine JSON)**
+  - [x] Terminal TTY detection using `mattn/go-isatty` in `internal/output/formatter.go`.
+  - [x] ANSI-styled tables with status, priority, and age formatting for human terminals.
+  - [x] Deterministic, token-efficient compact JSON for `--json` and piped/non-TTY execution.
+- [x] **Slice 2.2: Task Creation, Listing & Filtering**
+  - [x] Implement `tm add` (`tm new`) with `priority:H|M|L|C`, `project:<name>`, and `desc:"<description>"`.
+  - [x] Implement `tm list` (`tm ls`) with status and priority filtering.
+- [x] **Slice 2.3: Task State Mutations**
+  - [x] Positional command syntax preprocessing (`tm <id> start`, `tm <id> done`, `tm <id> block <reason>`, `tm <id> log <note>`, `tm <id>`).
+  - [x] Fast status mutations and active task flag updates in `internal/cmd/shortcuts.go`.
+- [x] **Slice 2.4: Memory Full-Text Search**
+  - [x] Implement `tm search <query>` across observations using SQLite FTS5 with BM25 ranking in `internal/cmd/search.go`.
+- [x] **Verification:**
+  - [x] Automated CLI command and JSON output test suite in `internal/cmd/cmd_test.go`.
 
 ---
 
-## Phase 3: Domain Models & Lifecycle State Machines
-- [x] **Slice 3.1: Task & Session Domain Models**
-  - [x] Define Pydantic models: `Task`, `TaskAnnotation`, `Session`, `Observation`, `Blocker`, `Reflection`
-  - [x] Implement task state machine (`PENDING`, `READY`, `ACTIVE`, `BLOCKED`, `COMPLETED`, `DELETED`)
-  - [x] Implement session state machine & zombie detection via stale heartbeats
+## Phase 3: Session Lifecycle & Crash-Resilient Context Engine
+- [x] **Slice 3.1: Session Initialization & Crash Recovery (`tm init`)**
+  - [x] Auto-detect unclosed/interrupted sessions and mark status as `interrupted`.
+  - [x] Auto-synthesize recovery notes from active task and last checkpoint.
+  - [x] Return full project context (`active_task`, `blockers`, `recent_observations`, `backlog`).
+- [x] **Slice 3.2: Optional Session Handoff (`tm handoff`)**
+  - [x] Cleanly conclude session with `summary` and `next_action`.
+  - [x] Ensure every task mutation auto-checkpoints the active session without requiring explicit handoffs.
+- [x] **Verification:**
+  - [x] End-to-end crash simulation and clean handoff integration tests in `internal/cmd/session_test.go`.
 
 ---
 
-## Phase 4: Workflow Invariant Enforcement Engine
-- [x] **Slice 4.1: Session & Completion Invariants (Rules 1, 2, 3, 7)**
-  - [x] Enforce **Rule 1**: Active task required before task modification/progress
-  - [x] Enforce **Rule 2**: Mandatory completion summary (>=20 chars) and evidence (>=10 chars)
-  - [x] Enforce **Rule 3**: Clean session exit (requires `next_action` if unfinished tasks exist)
-  - [x] Enforce **Rule 7**: Reflection gate threshold (triggers `REFLECTION_REQUIRED`)
-- [x] **Slice 4.2: Dependency DAG & Blocker Invariants (Rules 4, 5, 6)**
-  - [x] Enforce **Rule 4**: Blocker binds to task and sets status to `BLOCKED`
-  - [x] Enforce **Rule 5**: Knowledge taxonomy (durable observations vs task annotations)
-  - [x] Enforce **Rule 6**: Dependency cycle detection (DFS on DAG) & prerequisite completion check
-- [x] **Slice 4.3: Intelligent Task Scheduler**
-  - [x] Implement `task_get_next` calculation based on urgency, dependencies, blockers, and reflection state
-
----
-
-## Phase 5: Security & Verification Middleware
-- [x] **Slice 5.1: Embedded JWT Validator & Project Sandbox Guard**
-  - [x] Implement JWT signature verification (Ed25519, RS256, HS256)
-  - [x] Implement claims validation (`sub`, `aud == "taskmanager-mcp"`, `project`, `role`, `permissions`, `exp`)
-  - [x] Implement test fixture token generator for unit & integration tests
-  - [x] Implement project directory path confinement and traversal guard
-  - [x] Implement RBAC permission check per operation
-
----
-
-## Phase 6: Stdio MCP Server & Tool Registry
-- [x] **Slice 6.1: Stdio Transport Loop & Session Tools**
-  - [x] Implement stdio JSON-RPC server loop using MCP SDK
-  - [x] Implement subprocess environment token extraction (`TASKMANAGER_AUTH_TOKEN`)
-  - [x] Register `session_begin`, `session_heartbeat`, `session_end`
-  - [x] Implement append-only audit trail logging
-- [x] **Slice 6.2: Task Execution Tools**
-  - [x] Register `task_get_next`, `task_start`, `task_create`, `task_create_subtask`
-  - [x] Register `task_complete`, `task_annotate`, `task_get`, `task_list`
-- [x] **Slice 6.3: Knowledge, Blocker & Reflection Tools**
-  - [x] Register `observation_record` and `observation_search` (FTS5 BM25)
-  - [x] Register `blocker_create` and `blocker_resolve`
-  - [x] Register `workflow_reflect`
-
----
-
-## Phase 7: End-to-End Integration & Agent Verification
-- [x] **Slice 7.1: Subprocess Stdio Integration Test Suite**
-  - [x] Test end-to-end token minting -> stdio process spawn -> session initialization
-  - [x] Test complete workflow loop (task creation -> active -> evidence -> completion -> exit)
-  - [x] Test context reset recovery (second session recovers state & next action)
-  - [x] Test invariant violation rejections over stdio transport
-- [x] **Slice 7.2: Agent Host Configurations & Quickstart**
-  - [x] Provide ready-to-use Claude Desktop configuration (`templates/claude_desktop_config.json`)
-  - [x] Provide ready-to-use Cursor configuration (`templates/cursor_config.json`)
-  - [x] Create project bootstrap and token minting script (`scripts/generate_dev_token.py`)
+## Phase 4: Human TUI & Container Packaging
+- [x] **Slice 4.1: Terminal UI Dashboard (`tm tui`)**
+  - [x] Full-screen interactive Bubbletea dashboard in `internal/tui/tui.go`.
+  - [x] Tab filtering (All, Pending, In Progress, Blocked, Completed).
+  - [x] Keyboard shortcuts (`j`/`k`, `Enter` to start, `x` to complete, `b` to block, `v` for notes, `/` to search, `q` to quit).
+- [x] **Slice 4.2: Build Automation & Static Binary Release**
+  - [x] Implement `Makefile` with targets: `make build`, `make build-linux`, `make test`, `make clean`.
+  - [x] Produces static Linux binary `bin/tm-linux-amd64` (`CGO_ENABLED=0`) and host binary `bin/tm`.

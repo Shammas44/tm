@@ -42,3 +42,10 @@ htmlcov/
 *.db-shm
 .task/
 taskrc
+.taskmanager/
+
+# Go build artifacts
+bin/
+/tm
+*.exe
+

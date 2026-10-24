@@ -1,0 +1,68 @@
+{
+  "project": "taskmanager",
+  "task": "Rewrite TaskManager in Go as a zero-dependency CLI tool (dropping MCP and JWT auth)",
+  "worktree_path": "/Users/sebastientraber/Documents/Prog/sandbox/taskmanager/taskmanager-go-worktree",
+  "branch": "rewrite-go",
+  "go_version": "1.26.10",
+  "decisions": [
+    "Drop MCP server entirely: agents and humans run the exact same CLI binary ('tm' / 'taskmanager').",
+    "Drop Ed25519 JWT Auth (jwt-manager): security is enforced by Docker container bind-mount filesystem isolation.",
+    "Drop Taskwarrior daemon & external CLI: all task states, observations, and sessions reside in a single embedded SQLite database with FTS5.",
+    "Use pure Go SQLite driver (modernc.org/sqlite): no CGO needed, cross-compiles cleanly to static Linux binaries for Docker containers.",
+    "Session handoff is OPTIONAL: 'tm init' automatically detects interrupted sessions and recovers context from the last task update checkpoint.",
+    "Dual output format: formatted tables/ANSI for human TTY, deterministic token-efficient compact JSON when '--json' or non-TTY is used."
+  ],
+  "roadmap": [
+    {
+      "phase": 1,
+      "name": "Go Project Skeleton & SQLite Storage Engine",
+      "status": "completed",
+      "tasks": [
+        "Initialize go.mod at root of worktree (module taskmanager).",
+        "Add dependencies: modernc.org/sqlite, spf13/cobra, charmbracelet/lipgloss, charmbracelet/bubbletea.",
+        "Implement internal/db: connection setup with PRAGMA journal_mode=WAL, PRAGMA busy_timeout=5000, and auto-migrations.",
+        "Implement schema: tasks, sessions, observations, and observations_fts (FTS5).",
+        "Implement internal/store: CRUD operations for tasks (with autoincrement ID 1, 2, 3), observations, and sessions.",
+        "Write unit tests for internal/store verifying concurrent access and FTS5 search."
+      ]
+    },
+    {
+      "phase": 2,
+      "name": "Core Taskwarrior-Style CLI Commands & Output Formatter",
+      "status": "completed",
+      "tasks": [
+        "Implement internal/cmd/root.go: Cobra root command with global --db and --json flags.",
+        "Implement tm add <title> [priority:H|M|L|C] [project:<name>] [desc:<description>].",
+        "Implement tm list / tm ls with status/priority filters and dual output (table vs JSON).",
+        "Implement positional shortcuts: tm <id> start, tm <id> done, tm <id> block <reason>, tm <id> log <comment>.",
+        "Implement tm search <query> using FTS5 search across notes/observations.",
+        "Write unit tests for CLI command parsing and JSON output validation."
+      ]
+    },
+    {
+      "phase": 3,
+      "name": "Session Lifecycle & Crash-Resilient Context Engine",
+      "status": "completed",
+      "tasks": [
+        "Implement tm init [--json]: detect interrupted session, auto-checkpoint, synthesize recovery summary, return active task + context.",
+        "Implement tm handoff [summary] [next:<action>]: optional clean session closing.",
+        "Ensure every task modification command auto-updates the active session checkpoint timestamp and fallback notes in SQLite.",
+        "Write integration tests simulating sudden agent kill/interruption and verifying clean state restoration on next tm init."
+      ]
+    },
+    {
+      "phase": 4,
+      "name": "Bubbletea Human TUI & Container Packaging",
+      "status": "completed",
+      "tasks": [
+        "Implement tm tui: interactive terminal UI with charmbracelet/bubbletea for fast human task viewing and status toggling.",
+        "Create Makefile for CGO_ENABLED=0 static compilation (make build and make build-linux).",
+        "Tested static binary compilation and validated full test suite (go test ./...)."
+      ]
+    }
+  ],
+  "build_artifacts": {
+    "host_binary": "bin/tm",
+    "linux_static_binary": "bin/tm-linux-amd64"
+  }
+}

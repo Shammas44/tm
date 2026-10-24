@@ -246,6 +246,39 @@ func (s *Store) DeleteTask(ctx context.Context, id int64) error {
 	return nil
 }
 
+func (s *Store) DeleteTaskPermanently(ctx context.Context, id int64) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Clear active_task_id references in sessions
+	if _, err := tx.ExecContext(ctx, `UPDATE sessions SET active_task_id = NULL WHERE active_task_id = ?`, id); err != nil {
+		return fmt.Errorf("failed to clear session active task: %w", err)
+	}
+
+	// Delete observations (foreign key references task_id)
+	// Triggers on observations automatically clean up observations_fts
+	if _, err := tx.ExecContext(ctx, `DELETE FROM observations WHERE task_id = ?`, id); err != nil {
+		return fmt.Errorf("failed to delete task observations: %w", err)
+	}
+
+	// Delete the task record completely
+	res, err := tx.ExecContext(ctx, `DELETE FROM tasks WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("failed to permanently delete task: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return tx.Commit()
+}
+
 func (s *Store) ListTasks(ctx context.Context, filter TaskFilter) ([]*model.Task, error) {
 	query := `SELECT id, title, description, status, priority, project, active, blocker_reason, tags, dependencies, created_at, updated_at, completed_at FROM tasks WHERE 1=1`
 	var args []any

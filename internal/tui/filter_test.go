@@ -156,6 +156,7 @@ func TestRenderDetailPaneFormat(t *testing.T) {
 	task := &model.Task{
 		ID:            taskID,
 		Title:         "Refactor core",
+		Status:        model.StatusBlocked,
 		BlockerReason: "Waiting on PR #12\nReview pending",
 		Description:   "First line\nSecond line",
 	}
@@ -176,23 +177,39 @@ func TestRenderDetailPaneFormat(t *testing.T) {
 
 	rendered := m.renderDetailPane()
 
-	// Verify Blocker Reason header and indented lines
-	if !strings.Contains(rendered, "Blocker Reason:\n    Waiting on PR #12\n    Review pending") {
-		t.Errorf("expected Blocker Reason header and 4-space indented values, got:\n%s", rendered)
+	// Verify two-column split bar
+	if !strings.Contains(rendered, "Description (Left) │ Observations (Right)") {
+		t.Errorf("expected split header, got:\n%s", rendered)
 	}
 
-	// Verify Description header and indented lines
-	if !strings.Contains(rendered, "Description:\n    First line\n    Second line") {
-		t.Errorf("expected Description header and 4-space indented values, got:\n%s", rendered)
+	// Verify column separator
+	if !strings.Contains(rendered, " │ ") {
+		t.Errorf("expected column separator ' │ ', got:\n%s", rendered)
 	}
 
-	// Verify Observation header
-	if !strings.Contains(rendered, "Observation (2 recorded):") {
-		t.Errorf("expected 'Observation (2 recorded):', got:\n%s", rendered)
+	// Verify Description on left
+	if !strings.Contains(rendered, "Description:") || !strings.Contains(rendered, "First line") {
+		t.Errorf("expected Description in pane, got:\n%s", rendered)
 	}
 
-	// Verify observation bullet and indented lines
-	if !strings.Contains(rendered, "- [") || !strings.Contains(rendered, "(#1)\n  Obs line 1\n  Obs line 2") {
-		t.Errorf("expected observation formatted with bullet and 2-space indented lines, got:\n%s", rendered)
+	// Verify Blocker Reason in evidence as first observation with bullet
+	if !strings.Contains(rendered, "• [BLOCKER] Blocker Reason:") || !strings.Contains(rendered, "Waiting on PR #12") {
+		t.Errorf("expected Blocker Reason as first observation, got:\n%s", rendered)
+	}
+
+	// Verify Observation header counts blocker (2 obs + 1 blocker = 3)
+	if !strings.Contains(rendered, "Observation (3 recorded):") {
+		t.Errorf("expected 'Observation (3 recorded):', got:\n%s", rendered)
+	}
+
+	// Verify bullet point '•' for normal observations
+	if !strings.Contains(rendered, "• [") || !strings.Contains(rendered, "(#1)") {
+		t.Errorf("expected bullet '•' for observations, got:\n%s", rendered)
+	}
+
+	// Verify status column uppercase
+	statusText := m.formatStatusText(task)
+	if !strings.Contains(statusText, "BLOCKED") {
+		t.Errorf("expected uppercase status BLOCKED, got: %s", statusText)
 	}
 }

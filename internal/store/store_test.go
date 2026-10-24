@@ -108,6 +108,35 @@ func TestTaskCRUDAndStateTransitions(t *testing.T) {
 	}
 }
 
+func TestDeleteTaskPermanently(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	task, err := s.CreateTask(ctx, &model.Task{
+		Title:   "Task to purge",
+		Project: "purgeproj",
+	})
+	if err != nil {
+		t.Fatalf("CreateTask failed: %v", err)
+	}
+
+	_, err = s.AddObservation(ctx, nil, &task.ID, "Obs for purge task")
+	if err != nil {
+		t.Fatalf("AddObservation failed: %v", err)
+	}
+
+	if err := s.DeleteTaskPermanently(ctx, task.ID); err != nil {
+		t.Fatalf("DeleteTaskPermanently failed: %v", err)
+	}
+
+	// Should not be found at all
+	_, err = s.GetTask(ctx, task.ID)
+	if err != ErrNotFound {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
 func TestSessionLifecycleAndCheckpoints(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()

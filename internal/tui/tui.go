@@ -88,6 +88,7 @@ const (
 	ModeSearch
 	ModeBlockInput
 	ModeHelp
+	ModeDeleteConfirm
 )
 
 type editorDoneMsg struct {
@@ -115,6 +116,8 @@ type Model struct {
 	commandInput     string // For Vim command mode ':'
 	blockInput       string
 	statusMsg        string
+	deleteTargetTask *model.Task
+	deleteBlockedMsg string
 	lastKey          rune
 	lastKeyPressTime time.Time
 	width            int
@@ -318,6 +321,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Tags:          parsed.Tags,
 				Dependencies:  parsed.Dependencies,
 			}
+			if strings.TrimSpace(parsed.BlockerReason) != "" {
+				newTask.Status = model.StatusBlocked
+			}
 			created, err := m.store.CreateTask(ctx, newTask)
 			if err != nil {
 				m.statusMsg = fmt.Sprintf("Failed to create task: %v", err)
@@ -354,6 +360,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			existing.BlockerReason = parsed.BlockerReason
 			existing.Tags = parsed.Tags
 			existing.Dependencies = parsed.Dependencies
+			if strings.TrimSpace(parsed.BlockerReason) != "" {
+				existing.Status = model.StatusBlocked
+			}
 
 			if existing.Status == model.StatusInProgress {
 				_ = m.store.SetActiveTask(ctx, existing.ID)
@@ -513,6 +522,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
+		}
+
+		if m.viewMode == ModeDeleteConfirm {
+			if m.deleteBlockedMsg != "" {
+				m.viewMode = ModeList
+				m.deleteBlockedMsg = ""
+				return m, nil
+			}
+			switch msg.String() {
+			case "y", "Y", "enter":
+				if m.deleteTargetTask != nil {
+					_ = m.store.DeleteTaskPermanently(ctx, m.deleteTargetTask.ID)
+					m.deleteTargetTask = nil
+					m.viewMode = ModeList
+					m.reloadTasks()
+				}
+				return m, nil
+			case "n", "N", "esc", "q":
+				m.deleteTargetTask = nil
+				m.viewMode = ModeList
+				return m, nil
+			}
+			return m, nil
 		}
 
 		// ModeList keys
@@ -685,6 +717,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.blockInput = ""
 				m.viewMode = ModeBlockInput
 			}
+
+		case "d": // Delete task permanently with confirmation & dependency check
+			if len(m.tasks) == 0 || m.cursor >= len(m.tasks) {
+				return m, nil
+			}
+			t := m.tasks[m.cursor]
+
+			// Ensure no other task depends on this one
+			var dependentTasks []string
+			for _, other := range m.allTasks {
+				if other.ID == t.ID {
+					continue
+				}
+				for _, depID := range other.Dependencies {
+					if depID == t.ID {
+						dependentTasks = append(dependentTasks, fmt.Sprintf("#%d %q", other.ID, truncate(other.Title, 25)))
+						break
+					}
+				}
+			}
+
+			if len(dependentTasks) > 0 {
+				m.viewMode = ModeDeleteConfirm
+				m.deleteBlockedMsg = fmt.Sprintf("Cannot delete task #%d: prerequisite for task(s): %s.\nRemove dependencies first.\n\nPress any key to return.", t.ID, strings.Join(dependentTasks, ", "))
+				m.deleteTargetTask = nil
+				return m, nil
+			}
+
+			m.viewMode = ModeDeleteConfirm
+			m.deleteTargetTask = t
+			m.deleteBlockedMsg = ""
+			return m, nil
 
 		case "/": // Search
 			m.viewMode = ModeSearch
@@ -1005,12 +1069,46 @@ func (m Model) executeCommand(cmdStr string) (Model, tea.Cmd) {
 			m.statusMsg = "No task selected."
 			return m, nil
 		}
-		if err := m.store.DeleteTask(ctx, id); err != nil {
-			m.statusMsg = fmt.Sprintf("Failed to delete task #%d: %v", id, err)
-		} else {
-			m.statusMsg = fmt.Sprintf("Deleted task #%d", id)
-			m.reloadTasks()
+
+		// Ensure no other task depends on this one
+		var dependentTasks []string
+		for _, other := range m.allTasks {
+			if other.ID == id {
+				continue
+			}
+			for _, depID := range other.Dependencies {
+				if depID == id {
+					dependentTasks = append(dependentTasks, fmt.Sprintf("#%d %q", other.ID, truncate(other.Title, 25)))
+					break
+				}
+			}
 		}
+
+		if len(dependentTasks) > 0 {
+			m.viewMode = ModeDeleteConfirm
+			m.deleteBlockedMsg = fmt.Sprintf("Cannot delete task #%d: prerequisite for task(s): %s.\nRemove dependencies first.\n\nPress any key to return.", id, strings.Join(dependentTasks, ", "))
+			m.deleteTargetTask = nil
+			return m, nil
+		}
+
+		var targetTask *model.Task
+		for _, other := range m.allTasks {
+			if other.ID == id {
+				targetTask = other
+				break
+			}
+		}
+		if targetTask == nil {
+			targetTask, _ = m.store.GetTask(ctx, id)
+		}
+		if targetTask == nil {
+			m.statusMsg = fmt.Sprintf("Task #%d not found", id)
+			return m, nil
+		}
+
+		m.viewMode = ModeDeleteConfirm
+		m.deleteTargetTask = targetTask
+		m.deleteBlockedMsg = ""
 		return m, nil
 
 	default:
@@ -1055,6 +1153,23 @@ func (m Model) View() string {
 	}
 
 	// 3. Other modals
+	if m.viewMode == ModeDeleteConfirm {
+		if m.deleteBlockedMsg != "" {
+			s.WriteString(titleStyle.Render("TaskManager • Delete Task"))
+			s.WriteString("\n\n")
+			s.WriteString(blockedStyle.Render("Cannot Delete Task:\n"))
+			s.WriteString(m.deleteBlockedMsg + "\n")
+			return s.String()
+		}
+		if m.deleteTargetTask != nil {
+			s.WriteString(titleStyle.Render("TaskManager • Delete Task"))
+			s.WriteString("\n\n")
+			s.WriteString(fmt.Sprintf("Are you sure you want to permanently delete task #%d '%s'?\n\n", m.deleteTargetTask.ID, m.deleteTargetTask.Title))
+			s.WriteString(pendingStyle.Render("Press 'y' or Enter to confirm, 'n' or Esc to cancel: █\n"))
+			return s.String()
+		}
+	}
+
 	if m.viewMode == ModeBlockInput {
 		t := m.tasks[m.cursor]
 		s.WriteString(fmt.Sprintf("Enter block reason for #%d '%s': %s█\n(press Enter to confirm, Esc to cancel)\n\n",
@@ -1148,9 +1263,9 @@ func (m Model) View() string {
 			createdStr := t.CreatedAt.Local().Format("2006-01-02 15:04")
 			titleStr := truncate(t.Title, titleWidth)
 
-			rawStatus := string(t.Status)
+			rawStatus := strings.ToUpper(string(t.Status))
 			if t.Active {
-				rawStatus = "in_prog*"
+				rawStatus = "IN_PROG*"
 			}
 			rawPrio := string(t.Priority)
 			if rawPrio == "" {
@@ -1242,10 +1357,9 @@ func (m Model) View() string {
 	return s.String()
 }
 
-// Requirement 7: Readonly pane inspecting description and observations of selected task
+// Requirement 7: Readonly pane inspecting description (left) and observations (right)
 func (m Model) renderDetailPane() string {
 	paneHeight := m.previewPaneHeight()
-	var allLines []string
 
 	if len(m.tasks) == 0 || m.cursor >= len(m.tasks) {
 		sep := strings.Repeat("─", max(40, m.width-2))
@@ -1260,15 +1374,24 @@ func (m Model) renderDetailPane() string {
 
 	t := m.tasks[m.cursor]
 
-	// 1. Blocker Reason
-	hasBlockers := false
-	if strings.TrimSpace(t.BlockerReason) != "" {
-		hasBlockers = true
-		allLines = append(allLines, blockedStyle.Render("Blocker Reason:"))
-		reason := strings.TrimSpace(t.BlockerReason)
-		reasonWrapped := wrapText(reason, max(30, m.width-6), "    ")
-		for _, rl := range reasonWrapped {
-			allLines = append(allLines, rl)
+	// Determine split widths
+	sepStr := " │ "
+	sepLen := len(sepStr)
+	availableWidth := max(40, m.width)
+	leftWidth := (availableWidth - sepLen) / 2
+	if leftWidth < 20 {
+		leftWidth = 20
+	}
+	rightWidth := max(20, availableWidth-leftWidth-sepLen)
+
+	// Left column: Description & Prerequisites
+	var leftLines []string
+	desc := strings.TrimSpace(t.Description)
+	if desc != "" {
+		leftLines = append(leftLines, paneBarHead.Render("Description:"))
+		descWrapped := wrapText(desc, max(15, leftWidth-2), "  ")
+		for _, dl := range descWrapped {
+			leftLines = append(leftLines, dl)
 		}
 	}
 
@@ -1283,70 +1406,69 @@ func (m Model) renderDetailPane() string {
 				}
 			}
 			if depTask != nil && depTask.Status != model.StatusCompleted {
-				blockingDeps = append(blockingDeps, fmt.Sprintf("#%d %q (%s)", depTask.ID, truncate(depTask.Title, 25), depTask.Status))
+				blockingDeps = append(blockingDeps, fmt.Sprintf("#%d %q (%s)", depTask.ID, truncate(depTask.Title, max(10, leftWidth-16)), strings.ToUpper(string(depTask.Status))))
 			} else if depTask == nil {
 				blockingDeps = append(blockingDeps, fmt.Sprintf("#%d (unknown)", depID))
 			}
 		}
 		if len(blockingDeps) > 0 {
-			if hasBlockers {
-				allLines = append(allLines, "")
-			}
-			hasBlockers = true
-			allLines = append(allLines, blockedStyle.Render("Blocked by Prerequisite:"))
+			leftLines = append(leftLines, blockedStyle.Render("Prerequisites:"))
 			for _, bd := range blockingDeps {
-				allLines = append(allLines, "    "+bd)
+				leftLines = append(leftLines, "  "+bd)
 			}
-		} else if t.Status == model.StatusPending && !hasBlockers {
-			allLines = append(allLines, completedStyle.Render("✓ All prerequisites completed (Ready to start)"))
+		} else if t.Status == model.StatusPending {
+			leftLines = append(leftLines, completedStyle.Render("✓ Prerequisites completed"))
 		}
 	}
 
-	// 2. Description
-	desc := strings.TrimSpace(t.Description)
-	if desc != "" {
-		if hasBlockers {
-			allLines = append(allLines, "")
-		}
-		allLines = append(allLines, paneBarHead.Render("Description:"))
-		descWrapped := wrapText(desc, max(30, m.width-6), "    ")
-		for _, dl := range descWrapped {
-			allLines = append(allLines, dl)
-		}
+	if len(leftLines) == 0 {
+		leftLines = append(leftLines, paneSubStyle.Render("(No description recorded)"))
 	}
 
-	// 3. Observations & Notes
-	if len(m.selectedTaskObs) > 0 {
-		if hasBlockers || desc != "" {
-			allLines = append(allLines, "")
-		}
-		allLines = append(allLines, paneBarHead.Render(fmt.Sprintf("Observation (%d recorded):", len(m.selectedTaskObs))))
-		for obsIdx, o := range m.selectedTaskObs {
-			if obsIdx > 0 {
-				allLines = append(allLines, "") // empty line separator between observations
+	// Right column: Observations & Blocker (blocker is considered an observation and put in evidence first)
+	var rightLines []string
+	hasBlocker := strings.TrimSpace(t.BlockerReason) != ""
+	totalObsCount := len(m.selectedTaskObs)
+	if hasBlocker {
+		totalObsCount++
+	}
+
+	if totalObsCount > 0 {
+		rightLines = append(rightLines, paneBarHead.Render(fmt.Sprintf("Observation (%d recorded):", totalObsCount)))
+
+		// Blocker put in evidence as the first observation
+		if hasBlocker {
+			rightLines = append(rightLines, blockedStyle.Render("• [BLOCKER] Blocker Reason:"))
+			blockerWrapped := wrapText(strings.TrimSpace(t.BlockerReason), max(15, rightWidth-2), "  ")
+			for _, bl := range blockerWrapped {
+				rightLines = append(rightLines, bl)
 			}
-			headerLine := fmt.Sprintf("- [%s] (#%d)", o.CreatedAt.Local().Format("2006-01-02 15:04"), o.ID)
-			allLines = append(allLines, paneSubStyle.Render(headerLine))
+		}
+
+		// Observations with nicer bullet '•' and no extra newline chars between items to maximize space
+		for _, o := range m.selectedTaskObs {
+			headerLine := fmt.Sprintf("• [%s] (#%d)", o.CreatedAt.Local().Format("2006-01-02 15:04"), o.ID)
+			rightLines = append(rightLines, paneSubStyle.Render(headerLine))
 
 			contentLines := strings.Split(strings.TrimSpace(o.Content), "\n")
 			for _, rawLine := range contentLines {
 				rawLine = strings.TrimSpace(rawLine)
 				if rawLine == "" {
-					allLines = append(allLines, "")
 					continue
 				}
-				wrapped := wrapText(rawLine, max(30, m.width-6), "  ")
+				wrapped := wrapText(rawLine, max(15, rightWidth-2), "  ")
 				for _, wl := range wrapped {
-					allLines = append(allLines, wl)
+					rightLines = append(rightLines, wl)
 				}
 			}
 		}
-	} else if !hasBlockers && desc == "" {
-		allLines = append(allLines, paneSubStyle.Render("(No description, blockers, or observations recorded)"))
+	} else {
+		rightLines = append(rightLines, paneSubStyle.Render("(No observations recorded)"))
 	}
 
 	// Calculate scrolling
-	maxScroll := max(0, len(allLines)-paneHeight)
+	totalLines := max(len(leftLines), len(rightLines))
+	maxScroll := max(0, totalLines-paneHeight)
 	if m.previewScroll > maxScroll {
 		m.previewScroll = maxScroll
 	}
@@ -1354,33 +1476,44 @@ func (m Model) renderDetailPane() string {
 		m.previewScroll = 0
 	}
 
-	// Pane title bar with scroll indicator if content overflows
 	scrollHint := ""
-	if len(allLines) > paneHeight {
+	if totalLines > paneHeight {
 		scrollHint = fmt.Sprintf(" [%d-%d of %d • J/K to scroll] ",
 			m.previewScroll+1,
-			min(len(allLines), m.previewScroll+paneHeight),
-			len(allLines),
+			min(totalLines, m.previewScroll+paneHeight),
+			totalLines,
 		)
 	}
 
-	sepTitle := fmt.Sprintf("── Details #%d%s ", t.ID, scrollHint)
-	remainingLen := max(0, m.width-len(sepTitle)-2)
-	headerBar := paneBarHead.Render(sepTitle) + paneSubStyle.Render(strings.Repeat("─", remainingLen))
+	titleText := fmt.Sprintf("── Task #%d Details: Description (Left) │ Observations (Right)%s", t.ID, scrollHint)
+	barLen := max(0, m.width-len(titleText)-2)
+	headerBar := paneBarHead.Render(titleText) + paneSubStyle.Render(strings.Repeat("─", barLen))
 
 	var sb strings.Builder
 	sb.WriteString(headerBar + "\n")
 
-	endIdx := min(len(allLines), m.previewScroll+paneHeight)
+	leftStyle := lipgloss.NewStyle().Width(leftWidth)
+	rightStyle := lipgloss.NewStyle().Width(rightWidth)
+	sep := paneSubStyle.Render(sepStr)
+
+	endIdx := min(totalLines, m.previewScroll+paneHeight)
 	linesRendered := 0
-	if m.previewScroll < len(allLines) {
-		for i := m.previewScroll; i < endIdx; i++ {
-			sb.WriteString(allLines[i] + "\n")
-			linesRendered++
+	for i := m.previewScroll; i < endIdx; i++ {
+		var lStr, rStr string
+		if i < len(leftLines) {
+			lStr = leftLines[i]
 		}
+		if i < len(rightLines) {
+			rStr = rightLines[i]
+		}
+		row := leftStyle.Render(lStr) + sep + rightStyle.Render(rStr)
+		sb.WriteString(row + "\n")
+		linesRendered++
 	}
+
 	for linesRendered < paneHeight {
-		sb.WriteString("\n")
+		emptyRow := leftStyle.Render("") + sep + rightStyle.Render("")
+		sb.WriteString(emptyRow + "\n")
 		linesRendered++
 	}
 
@@ -1427,6 +1560,7 @@ func (m Model) helpContentLines() []string {
 		hKey("  Enter") + hDesc("Start task (mark in_progress & active)"),
 		hKey("  x") + hDesc("Complete task (mark done)"),
 		hKey("  b") + hDesc("Block task (prompts for blocker reason)"),
+		hKey("  d") + hDesc("Delete task permanently (with confirmation)"),
 		hKey("  a, c") + hDesc("Create new task in $EDITOR"),
 		hKey("  e") + hDesc("Edit task & past observations in $EDITOR"),
 		"",
@@ -1522,9 +1656,9 @@ func (m Model) countForTab(tabIdx int) int {
 }
 
 func (m Model) formatStatusText(t *model.Task) string {
-	rawStatus := string(t.Status)
+	rawStatus := strings.ToUpper(string(t.Status))
 	if t.Active {
-		rawStatus = "in_prog*"
+		rawStatus = "IN_PROG*"
 	}
 	switch t.Status {
 	case model.StatusInProgress:

@@ -72,6 +72,9 @@ var editCmd = &cobra.Command{
 			}
 			if cmd.Flags().Changed("block-reason") {
 				task.BlockerReason = strings.ReplaceAll(editBlockReason, "\\n", "\n")
+				if strings.TrimSpace(task.BlockerReason) != "" && !cmd.Flags().Changed("status") {
+					task.Status = model.StatusBlocked
+				}
 			}
 			if cmd.Flags().Changed("tags") {
 				var tags []string
@@ -168,6 +171,9 @@ var editCmd = &cobra.Command{
 		task.Project = parsed.Project
 		task.Description = parsed.Description
 		task.BlockerReason = parsed.BlockerReason
+		if strings.TrimSpace(task.BlockerReason) != "" {
+			task.Status = model.StatusBlocked
+		}
 		task.Tags = parsed.Tags
 		task.Dependencies = parsed.Dependencies
 

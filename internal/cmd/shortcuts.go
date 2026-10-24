@@ -215,22 +215,35 @@ var deleteCmd = &cobra.Command{
 			return fmt.Errorf("failed to get task #%d: %w", id, err)
 		}
 
-		if err := appStore.DeleteTask(ctx, id); err != nil {
+		// Ensure no other task depends on this task before deleting
+		allTasks, _ := appStore.ListTasks(ctx, store.TaskFilter{IncludeDeleted: false})
+		for _, other := range allTasks {
+			if other.ID == id {
+				continue
+			}
+			for _, depID := range other.Dependencies {
+				if depID == id {
+					return fmt.Errorf("cannot delete task #%d: task #%d (%q) depends on it", id, other.ID, other.Title)
+				}
+			}
+		}
+
+		if err := appStore.DeleteTaskPermanently(ctx, id); err != nil {
 			return fmt.Errorf("failed to delete task #%d: %w", id, err)
 		}
 
-		CheckpointActiveSession(ctx, nil, fmt.Sprintf("Cancelled task #%d: %s", id, task.Title))
+		CheckpointActiveSession(ctx, nil, fmt.Sprintf("Deleted task #%d: %s", id, task.Title))
 
 		if formatter.ShouldUseJSON() {
 			return formatter.PrintJSON(map[string]any{
-				"cancelled": true,
-				"id":        id,
-				"title":     task.Title,
+				"deleted": true,
+				"id":      id,
+				"title":   task.Title,
 			})
 		}
 
 		if !quietFlag {
-			fmt.Fprintf(cmd.OutOrStdout(), "Cancelled task #%d: %s\n", id, task.Title)
+			fmt.Fprintf(cmd.OutOrStdout(), "Deleted task #%d: %s\n", id, task.Title)
 		}
 		return nil
 	},

@@ -334,18 +334,18 @@ Full-screen interactive terminal dashboard built with Bubbletea and Lipgloss wit
   - `Enter`: Start task (`in_progress` & `active`)
   - `x`: Mark task completed (`done`)
   - `b`: Prompt for blocker reason
+  - `d`: **Delete task permanently** (prompts for confirmation; blocked if other tasks depend on it)
   - `/`: Enhanced search & filter (`+tag`, `+READY`, `+BLOCKED`, `project:x`, `pri:H`, text)
   - `:`: **Enter Vim Command Mode** (`:add`, `:start`, `:done`, `:block`, `:log`, `:tag`, `:dep`, `:edit`, `:del`, `:q`)
   - `?`: **Open complete full-screen controls & shortcuts help window**
   - `q` or `Ctrl+C`: Exit TUI
 
-* **Readonly Inspection Pane:**
-  - The bottom section of the screen provides a live readonly inspection pane for the currently selected task without repeating information already displayed in the task row above.
-  - Dynamically displays:
-    - **Blockers:** Explicit blocker reasons and incomplete prerequisite dependency task titles and statuses.
-    - **Task Description:** Formatted multi-line description text with automatic word-wrapping.
-    - **Technical Observations:** Timestamped history of all recorded notes and discoveries.
-    - Scrollable directly with `J` / `K` or `Ctrl+D` / `Ctrl+U`.
+* **Dual-Column Readonly Inspection Pane (Left/Right Split):**
+  - The bottom half of the screen is divided into two side-by-side columns:
+    - **Left Column (Description & Prerequisites):** Displays task description and incomplete prerequisite dependencies.
+    - **Right Column (Observations & Blockers):** Displays observations using clean bullet points (`• [date] (#id)`), with any blocker reason prominently featured as the first observation item (`• [BLOCKER] Blocker Reason:`).
+  - Maximizes vertical space with zero empty newline padding.
+  - Scrollable directly with `J` / `K` or `Ctrl+D` / `Ctrl+U`.
 
 * **Command Mode (`:`):**
   - Pressing `:` activates the bottom command prompt:

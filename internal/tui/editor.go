@@ -182,6 +182,9 @@ func ParseTaskTemplate(content string) (ParsedTask, error) {
 		}
 		res.Project = strings.TrimSpace(raw.Project)
 		res.BlockerReason = strings.TrimSpace(raw.BlockerReason)
+		if res.BlockerReason != "" {
+			res.Status = model.StatusBlocked
+		}
 		res.NewNote = strings.TrimSpace(raw.NewNote)
 		res.Description = strings.TrimSpace(raw.Description)
 
@@ -425,6 +428,9 @@ func parseLegacyTaskTemplate(content string) (ParsedTask, error) {
 			}
 		case "blocker reason", "blocker", "block_reason":
 			res.BlockerReason = val
+			if strings.TrimSpace(res.BlockerReason) != "" {
+				res.Status = model.StatusBlocked
+			}
 		}
 	}
 

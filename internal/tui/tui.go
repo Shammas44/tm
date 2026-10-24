@@ -232,36 +232,35 @@ func (m *Model) adjustScroll() {
 	}
 }
 
-func (m Model) previewPaneHeight() int {
-	if m.height <= 18 {
-		return 5
-	}
-	p := (m.height - 8) / 3
-	if p < 5 {
-		return 5
-	}
-	if p > 10 {
-		return 10
-	}
-	return p
-}
-
-func (m Model) availableRows() int {
-	// Total height minus:
-	// - Header lines: 2
-	// - Search / filter line (if any): 2
-	// - Table headers + separator: 2
-	// - Preview pane separator + content: 1 + previewHeight
-	// - Status / Command line: 1
-	overhead := 2 + 2 + 1 + m.previewPaneHeight() + 1
+func (m Model) topSectionOverhead() int {
+	overhead := 4 // Title banner (2) + Table header & sep (2)
 	if m.searchQuery != "" || m.viewMode == ModeSearch {
 		overhead += 2
 	}
-	rows := m.height - overhead
-	if rows < 3 {
-		return 3
+	return overhead
+}
+
+func (m Model) availableRows() int {
+	// Task list takes half of screen height
+	halfTop := m.height / 2
+	overhead := m.topSectionOverhead()
+	rows := halfTop - overhead
+	if rows < 2 {
+		return 2
 	}
 	return rows
+}
+
+func (m Model) previewPaneHeight() int {
+	// Task details takes the other half of screen height
+	halfTop := m.height / 2
+	halfBottom := m.height - halfTop
+	// 1 line for details separator, 1 line for command/spacing footer
+	p := halfBottom - 2
+	if p < 3 {
+		return 3
+	}
+	return p
 }
 
 func (m Model) Init() tea.Cmd {
@@ -396,12 +395,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		if m.viewMode == ModeHelp {
+			maxOffset := m.maxHelpScrollOffset()
 			switch msg.String() {
 			case "esc", "q", "?", "enter":
 				m.viewMode = ModeList
+				m.helpScrollOffset = 0
 				return m, nil
 			case "j", "down":
-				m.helpScrollOffset++
+				if m.helpScrollOffset < maxOffset {
+					m.helpScrollOffset++
+				}
 				return m, nil
 			case "k", "up":
 				if m.helpScrollOffset > 0 {
@@ -412,17 +415,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.helpScrollOffset = 0
 				return m, nil
 			case "G", "end":
-				m.helpScrollOffset = 30
+				m.helpScrollOffset = maxOffset
 				return m, nil
-			case "pgdown":
-				m.helpScrollOffset += 10
+			case "pgdown", "ctrl+d":
+				step := max(1, m.helpVisibleHeight()/2)
+				m.helpScrollOffset = min(maxOffset, m.helpScrollOffset+step)
 				return m, nil
-			case "pgup":
-				if m.helpScrollOffset > 10 {
-					m.helpScrollOffset -= 10
-				} else {
-					m.helpScrollOffset = 0
-				}
+			case "pgup", "ctrl+u":
+				step := max(1, m.helpVisibleHeight()/2)
+				m.helpScrollOffset = max(0, m.helpScrollOffset-step)
 				return m, nil
 			}
 			return m, nil
@@ -1107,10 +1108,13 @@ func (m Model) View() string {
 	s.WriteString(strings.Repeat("─", max(75, m.width-2)) + "\n")
 
 	// 5. Task Rows with Strict Truncation, Crosshair Cell Highlight, and Viewport Scrolling
+	visibleRows := m.availableRows()
+	renderedRows := 0
+
 	if len(m.tasks) == 0 {
 		s.WriteString("  No tasks found in this category.\n")
+		renderedRows = 1
 	} else {
-		visibleRows := m.availableRows()
 		endIdx := min(len(m.tasks), m.scrollOffset+visibleRows)
 
 		for i := m.scrollOffset; i < endIdx; i++ {
@@ -1216,15 +1220,23 @@ func (m Model) View() string {
 				rowLine := strings.Join(renderedCells, colGap)
 				s.WriteString(rowLine + "\n")
 			}
+			renderedRows++
 		}
 	}
 
-	// 6. Requirement 7: Readonly Detail Inspection Pane
+	// Pad unused rows so task list consistently occupies top half of screen height
+	for r := renderedRows; r < visibleRows; r++ {
+		s.WriteString("\n")
+	}
+
+	// 6. Requirement 7: Readonly Detail Inspection Pane (occupies bottom half of screen height)
 	s.WriteString(m.renderDetailPane())
 
-	// Command Mode Input (Controls info bar and Status line removed)
+	// Command Mode Input or clean spacing line
 	if m.viewMode == ModeCommand {
 		s.WriteString(cmdPrompt.Render(":") + m.commandInput + "█\n")
+	} else {
+		s.WriteString("\n")
 	}
 
 	return s.String()
@@ -1248,19 +1260,15 @@ func (m Model) renderDetailPane() string {
 
 	t := m.tasks[m.cursor]
 
-	// 1. Blockers info (Reason + Incomplete Prerequisite Tasks) - no duplicate metadata
+	// 1. Blocker Reason
 	hasBlockers := false
 	if strings.TrimSpace(t.BlockerReason) != "" {
 		hasBlockers = true
+		allLines = append(allLines, blockedStyle.Render("Blocker Reason:"))
 		reason := strings.TrimSpace(t.BlockerReason)
-		if strings.Contains(reason, "\n") {
-			allLines = append(allLines, blockedStyle.Render("  Blocker Reason:"))
-			reasonWrapped := wrapText(reason, max(30, m.width-6), "    ")
-			for _, rl := range reasonWrapped {
-				allLines = append(allLines, rl)
-			}
-		} else {
-			allLines = append(allLines, blockedStyle.Render("  Blocker Reason: ")+reason)
+		reasonWrapped := wrapText(reason, max(30, m.width-6), "    ")
+		for _, rl := range reasonWrapped {
+			allLines = append(allLines, rl)
 		}
 	}
 
@@ -1281,65 +1289,60 @@ func (m Model) renderDetailPane() string {
 			}
 		}
 		if len(blockingDeps) > 0 {
+			if hasBlockers {
+				allLines = append(allLines, "")
+			}
 			hasBlockers = true
-			allLines = append(allLines, blockedStyle.Render("  Blocked by Prerequisite: ")+strings.Join(blockingDeps, ", "))
+			allLines = append(allLines, blockedStyle.Render("Blocked by Prerequisite:"))
+			for _, bd := range blockingDeps {
+				allLines = append(allLines, "    "+bd)
+			}
 		} else if t.Status == model.StatusPending && !hasBlockers {
-			allLines = append(allLines, completedStyle.Render("  ✓ All prerequisites completed (Ready to start)"))
+			allLines = append(allLines, completedStyle.Render("✓ All prerequisites completed (Ready to start)"))
 		}
 	}
 
-	// 2. Description (multi-line, nicely formatted)
+	// 2. Description
 	desc := strings.TrimSpace(t.Description)
 	if desc != "" {
 		if hasBlockers {
 			allLines = append(allLines, "")
 		}
-		allLines = append(allLines, paneBarHead.Render("  Description:"))
+		allLines = append(allLines, paneBarHead.Render("Description:"))
 		descWrapped := wrapText(desc, max(30, m.width-6), "    ")
 		for _, dl := range descWrapped {
 			allLines = append(allLines, dl)
 		}
 	}
 
-	// 3. Observations & Notes (multi-line, nicely formatted)
+	// 3. Observations & Notes
 	if len(m.selectedTaskObs) > 0 {
 		if hasBlockers || desc != "" {
 			allLines = append(allLines, "")
 		}
-		allLines = append(allLines, paneBarHead.Render(fmt.Sprintf("  Observations (%d recorded):", len(m.selectedTaskObs))))
+		allLines = append(allLines, paneBarHead.Render(fmt.Sprintf("Observation (%d recorded):", len(m.selectedTaskObs))))
 		for obsIdx, o := range m.selectedTaskObs {
 			if obsIdx > 0 {
-				allLines = append(allLines, "") // separator between distinct observations
+				allLines = append(allLines, "") // empty line separator between observations
 			}
-			headerPrefix := fmt.Sprintf("  • [%s] (#%d) ", o.CreatedAt.Local().Format("2006-01-02 15:04"), o.ID)
-			subIndent := "      "
+			headerLine := fmt.Sprintf("- [%s] (#%d)", o.CreatedAt.Local().Format("2006-01-02 15:04"), o.ID)
+			allLines = append(allLines, paneSubStyle.Render(headerLine))
+
 			contentLines := strings.Split(strings.TrimSpace(o.Content), "\n")
-			for lineIdx, rawLine := range contentLines {
+			for _, rawLine := range contentLines {
 				rawLine = strings.TrimSpace(rawLine)
 				if rawLine == "" {
 					allLines = append(allLines, "")
 					continue
 				}
-				if lineIdx == 0 {
-					firstWrapped := wrapText(rawLine, max(30, m.width-6-len(headerPrefix)), "")
-					if len(firstWrapped) > 0 {
-						allLines = append(allLines, paneSubStyle.Render(headerPrefix)+firstWrapped[0])
-						for _, fw := range firstWrapped[1:] {
-							allLines = append(allLines, subIndent+fw)
-						}
-					} else {
-						allLines = append(allLines, paneSubStyle.Render(headerPrefix))
-					}
-				} else {
-					subWrapped := wrapText(rawLine, max(30, m.width-6-len(subIndent)), subIndent)
-					for _, sw := range subWrapped {
-						allLines = append(allLines, sw)
-					}
+				wrapped := wrapText(rawLine, max(30, m.width-6), "  ")
+				for _, wl := range wrapped {
+					allLines = append(allLines, wl)
 				}
 			}
 		}
 	} else if !hasBlockers && desc == "" {
-		allLines = append(allLines, paneSubStyle.Render("  (No description, blockers, or observations recorded)"))
+		allLines = append(allLines, paneSubStyle.Render("(No description, blockers, or observations recorded)"))
 	}
 
 	// Calculate scrolling
@@ -1384,23 +1387,27 @@ func (m Model) renderDetailPane() string {
 	return sb.String()
 }
 
-func (m Model) renderFullScreenHelp() string {
-	boxWidth := min(78, max(50, m.width-4))
-	visibleHeight := max(8, m.height-2)
+func (m Model) helpVisibleHeight() int {
+	return max(6, m.height-4)
+}
+
+func (m Model) helpContentLines() []string {
+	keyWidth := 26
+	descWidth := max(25, m.width-keyWidth-4)
+	lineWidth := min(m.width, keyWidth+descWidth+2)
 
 	hKey := func(k string) string {
-		return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12")).Width(18).Render(k)
+		return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12")).Width(keyWidth).Render(k)
 	}
 	hDesc := func(d string) string {
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Render(d)
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Width(descWidth).Render(truncate(d, descWidth))
 	}
 	hSec := func(t string) string {
-		return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("33")).Render("── " + t + " " + strings.Repeat("─", max(0, boxWidth-len(t)-6)))
+		barLen := max(0, lineWidth-len(t)-5)
+		return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("33")).Render("── " + t + " " + strings.Repeat("─", barLen))
 	}
 
-	lines := []string{
-		lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12")).Render("                TaskManager • Controls & Commands Reference"),
-		"",
+	return []string{
 		hSec("NAVIGATION"),
 		hKey("  j / k, ↓ / ↑") + hDesc("Navigate rows (tasks)"),
 		hKey("  h / l, ← / →") + hDesc("Select column left / right"),
@@ -1438,26 +1445,47 @@ func (m Model) renderFullScreenHelp() string {
 		hSec("SEARCH & FILTER"),
 		hKey("  /") + hDesc("Search text, +tag, +READY, +BLOCKED, pri:H, project:x"),
 		hKey("  Esc") + hDesc("Clear search / close modal"),
-		"",
-		lipgloss.NewStyle().Foreground(lipgloss.Color("243")).Render("Press Esc, Enter, q, or ? to return to tasks • j/k to scroll help"),
+	}
+}
+
+func (m Model) maxHelpScrollOffset() int {
+	totalLines := len(m.helpContentLines())
+	visHeight := m.helpVisibleHeight()
+	maxOffset := totalLines - visHeight
+	if maxOffset < 0 {
+		return 0
+	}
+	return maxOffset
+}
+
+func (m Model) renderFullScreenHelp() string {
+	lines := m.helpContentLines()
+	visibleHeight := m.helpVisibleHeight()
+
+	maxOffset := m.maxHelpScrollOffset()
+	scrollOffset := m.helpScrollOffset
+	if scrollOffset > maxOffset {
+		scrollOffset = maxOffset
 	}
 
-	maxOffset := max(0, len(lines)-visibleHeight)
-	if m.helpScrollOffset > maxOffset {
-		m.helpScrollOffset = maxOffset
-	}
+	endIdx := min(len(lines), scrollOffset+visibleHeight)
+	visibleLines := lines[scrollOffset:endIdx]
 
-	endIdx := min(len(lines), m.helpScrollOffset+visibleHeight)
-	visibleLines := lines[m.helpScrollOffset:endIdx]
+	var sb strings.Builder
+	// Header bar: No border
+	sb.WriteString(titleStyle.Render("TaskManager • Controls & Commands Reference"))
+	sb.WriteString(" ")
+	scrollInfo := fmt.Sprintf("[%d-%d of %d]  ?: close", scrollOffset+1, endIdx, len(lines))
+	sb.WriteString(helpStyle.Render(scrollInfo))
+	sb.WriteString("\n\n")
 
-	fullBoxStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("12")).
-		Padding(0, 1).
-		Width(boxWidth).
-		Height(visibleHeight)
+	sb.WriteString(strings.Join(visibleLines, "\n"))
+	sb.WriteString("\n\n")
 
-	return fullBoxStyle.Render(strings.Join(visibleLines, "\n"))
+	// Footer bar: Controls hint
+	sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("243")).Render("Press Esc, Enter, q, or ? to return to tasks • j/k to scroll • g/G for top/bottom\n"))
+
+	return sb.String()
 }
 
 func (m Model) countForTab(tabIdx int) int {

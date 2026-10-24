@@ -101,3 +101,98 @@ func TestWrapText(t *testing.T) {
 		}
 	}
 }
+
+func TestHalfHeightSplit(t *testing.T) {
+	m := Model{
+		height: 30,
+		width:  100,
+	}
+
+	halfTop := m.height / 2
+	halfBottom := m.height - halfTop
+
+	// Top half: overhead + availableRows should equal halfTop
+	overhead := m.topSectionOverhead()
+	avail := m.availableRows()
+	if overhead+avail != halfTop {
+		t.Errorf("expected top section to equal half screen (%d), got overhead (%d) + avail (%d) = %d",
+			halfTop, overhead, avail, overhead+avail)
+	}
+
+	// Bottom half: separator (1) + previewPaneHeight + footer (1) should equal halfBottom
+	paneH := m.previewPaneHeight()
+	if 1+paneH+1 != halfBottom {
+		t.Errorf("expected bottom section to equal half screen (%d), got 1 + paneH (%d) + 1 = %d",
+			halfBottom, paneH, 1+paneH+1)
+	}
+}
+
+func TestHelpLayoutAndScrolling(t *testing.T) {
+	m := Model{
+		height: 24,
+		width:  100,
+	}
+
+	lines := m.helpContentLines()
+	if len(lines) == 0 {
+		t.Fatalf("expected help content lines, got 0")
+	}
+
+	maxOffset := m.maxHelpScrollOffset()
+	visHeight := m.helpVisibleHeight()
+	if maxOffset != len(lines)-visHeight {
+		t.Errorf("expected maxOffset %d, got %d", len(lines)-visHeight, maxOffset)
+	}
+
+	// Ensure help render does not contain borders
+	helpView := m.renderFullScreenHelp()
+	if strings.Contains(helpView, "╭") || strings.Contains(helpView, "╮") || strings.Contains(helpView, "╰") || strings.Contains(helpView, "╯") {
+		t.Errorf("expected help view to have no rounded popup border")
+	}
+}
+
+func TestRenderDetailPaneFormat(t *testing.T) {
+	taskID := int64(42)
+	task := &model.Task{
+		ID:            taskID,
+		Title:         "Refactor core",
+		BlockerReason: "Waiting on PR #12\nReview pending",
+		Description:   "First line\nSecond line",
+	}
+
+	obs := []*model.Observation{
+		{ID: 1, TaskID: &taskID, Content: "Obs line 1\nObs line 2", CreatedAt: time.Now()},
+		{ID: 2, TaskID: &taskID, Content: "Single line obs", CreatedAt: time.Now()},
+	}
+
+	m := Model{
+		height:          30,
+		width:           100,
+		tasks:           []*model.Task{task},
+		allTasks:        []*model.Task{task},
+		selectedTaskObs: obs,
+		cursor:          0,
+	}
+
+	rendered := m.renderDetailPane()
+
+	// Verify Blocker Reason header and indented lines
+	if !strings.Contains(rendered, "Blocker Reason:\n    Waiting on PR #12\n    Review pending") {
+		t.Errorf("expected Blocker Reason header and 4-space indented values, got:\n%s", rendered)
+	}
+
+	// Verify Description header and indented lines
+	if !strings.Contains(rendered, "Description:\n    First line\n    Second line") {
+		t.Errorf("expected Description header and 4-space indented values, got:\n%s", rendered)
+	}
+
+	// Verify Observation header
+	if !strings.Contains(rendered, "Observation (2 recorded):") {
+		t.Errorf("expected 'Observation (2 recorded):', got:\n%s", rendered)
+	}
+
+	// Verify observation bullet and indented lines
+	if !strings.Contains(rendered, "- [") || !strings.Contains(rendered, "(#1)\n  Obs line 1\n  Obs line 2") {
+		t.Errorf("expected observation formatted with bullet and 2-space indented lines, got:\n%s", rendered)
+	}
+}

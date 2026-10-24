@@ -72,11 +72,32 @@ func resolveDBPath(customPath string) string {
 	if customPath != "" {
 		return customPath
 	}
+	// Fallback: check os.Args in case a subcommand disabled flag parsing (e.g. tag, dep)
+	for i, arg := range os.Args {
+		if arg == "--db" && i+1 < len(os.Args) {
+			return os.Args[i+1]
+		}
+		if strings.HasPrefix(arg, "--db=") {
+			return strings.TrimPrefix(arg, "--db=")
+		}
+	}
 	if env := os.Getenv("TASKMANAGER_DB"); env != "" {
 		return env
 	}
 
 	proj := projectFlag
+	if proj == "" {
+		for i, arg := range os.Args {
+			if (arg == "-P" || arg == "--project") && i+1 < len(os.Args) {
+				proj = os.Args[i+1]
+				break
+			}
+			if strings.HasPrefix(arg, "--project=") {
+				proj = strings.TrimPrefix(arg, "--project=")
+				break
+			}
+		}
+	}
 	if proj == "" {
 		proj = os.Getenv("TASKMANAGER_PROJECT")
 	}

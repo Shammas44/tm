@@ -6,7 +6,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -19,10 +18,6 @@ var (
 			Bold(true).
 			Foreground(lipgloss.Color("205")).
 			Background(lipgloss.Color("235")).
-			Padding(0, 1)
-
-	tabStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("240")).
 			Padding(0, 1)
 
 	activeTabStyle = lipgloss.NewStyle().
@@ -53,12 +48,8 @@ var (
 
 	helpStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
 
-	modalBoxStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("62")).
-			Padding(1, 2)
-
-	// Column Widths for pixel-perfect alignment
+	// Column Widths with guaranteed 2-character gap separation
+	colGap          = "  "
 	colMarkWidth    = 2
 	colIDWidth      = 4
 	colStatusWidth  = 11
@@ -66,7 +57,7 @@ var (
 	colProjectWidth = 10
 	colTagsWidth    = 12
 	colDepsWidth    = 6
-	colCreatedWidth = 7
+	colCreatedWidth = 16 // Human-readable timestamp e.g. "2026-10-24 14:15"
 )
 
 type ViewMode int
@@ -87,20 +78,21 @@ type editorDoneMsg struct {
 }
 
 type Model struct {
-	store        *store.Store
-	tasks        []*model.Task
-	allTasks     []*model.Task
-	activeTab    int // 0: All, 1: Ready, 2: Pending, 3: In Progress, 4: Blocked, 5: Completed
-	cursor       int
-	scrollOffset int
-	sortOrder    SortOrder
-	viewMode     ViewMode
-	observations []*model.Observation
-	searchQuery  string
-	blockInput   string
-	statusMsg    string
-	width        int
-	height       int
+	store            *store.Store
+	tasks            []*model.Task
+	allTasks         []*model.Task
+	activeTab        int // 0: All, 1: Ready, 2: Pending, 3: In Progress, 4: Blocked, 5: Completed
+	cursor           int
+	scrollOffset     int
+	helpScrollOffset int
+	sortOrder        SortOrder
+	viewMode         ViewMode
+	observations     []*model.Observation
+	searchQuery      string
+	blockInput       string
+	statusMsg        string
+	width            int
+	height           int
 }
 
 var tabs = []string{"All", "Ready", "Pending", "In Progress", "Blocked", "Completed"}
@@ -134,7 +126,6 @@ func (m *Model) filterTasks() {
 	var filtered []*model.Task
 
 	for _, t := range m.allTasks {
-		// Tab level filter
 		vtags := model.ComputeVirtualTags(t, m.allTasks, false)
 		vtagMap := make(map[string]bool)
 		for _, vt := range vtags {
@@ -195,7 +186,7 @@ func (m *Model) adjustScroll() {
 }
 
 func (m Model) availableRows() int {
-	rows := m.height - 8
+	rows := m.height - 7
 	if rows < 3 {
 		return 3
 	}
@@ -240,7 +231,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Get active session for checkpointing
 		activeSession, _ := m.store.GetActiveSession(ctx)
 		var sessionID *string
 		if activeSession != nil {
@@ -267,7 +257,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				_ = m.store.SetActiveTask(ctx, created.ID)
 			}
 
-			// Record new note if provided
 			if strings.TrimSpace(parsed.NewNote) != "" {
 				_, _ = m.store.AddObservation(ctx, sessionID, &created.ID, parsed.NewNote)
 			}
@@ -306,6 +295,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
+			// Modify / delete existing observations based on editor changes
+			origObs, _ := m.store.ListObservations(ctx, store.ObservationFilter{TaskID: &existing.ID})
+			for _, o := range origObs {
+				if newContent, found := parsed.ExistingNotes[o.ID]; found {
+					trimmedContent := strings.TrimSpace(newContent)
+					if trimmedContent == "" {
+						_ = m.store.DeleteObservation(ctx, o.ID)
+					} else if trimmedContent != o.Content {
+						_ = m.store.UpdateObservation(ctx, o.ID, trimmedContent)
+					}
+				} else {
+					// User deleted the line from editor
+					_ = m.store.DeleteObservation(ctx, o.ID)
+				}
+			}
+
 			// Record new note if provided
 			if strings.TrimSpace(parsed.NewNote) != "" {
 				_, _ = m.store.AddObservation(ctx, sessionID, &existing.ID, parsed.NewNote)
@@ -325,6 +330,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.String() {
 			case "esc", "q", "h", "?", "enter":
 				m.viewMode = ModeList
+				return m, nil
+			case "j", "down":
+				m.helpScrollOffset++
+				return m, nil
+			case "k", "up":
+				if m.helpScrollOffset > 0 {
+					m.helpScrollOffset--
+				}
+				return m, nil
+			case "g", "home":
+				m.helpScrollOffset = 0
+				return m, nil
+			case "G", "end":
+				m.helpScrollOffset = 30
+				return m, nil
+			case "pgdown":
+				m.helpScrollOffset += 10
+				return m, nil
+			case "pgup":
+				if m.helpScrollOffset > 10 {
+					m.helpScrollOffset -= 10
+				} else {
+					m.helpScrollOffset = 0
+				}
 				return m, nil
 			}
 			return m, nil
@@ -404,6 +433,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "h", "?": // Help modal
 			m.viewMode = ModeHelp
+			m.helpScrollOffset = 0
 			return m, nil
 
 		case "up", "k":
@@ -418,11 +448,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.adjustScroll()
 			}
 
-		case "g", "home": // Top
+		case "g", "home":
 			m.cursor = 0
 			m.scrollOffset = 0
 
-		case "G", "end": // Bottom
+		case "G", "end":
 			if len(m.tasks) > 0 {
 				m.cursor = len(m.tasks) - 1
 				m.adjustScroll()
@@ -553,47 +583,42 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) View() string {
+	// Full window help modal
+	if m.viewMode == ModeHelp {
+		return m.renderFullScreenHelp()
+	}
+
 	var s strings.Builder
 
-	// 1. Header with title and tabs
-	s.WriteString(titleStyle.Render("TaskManager TUI"))
-	s.WriteString("  ")
+	// 1. Header: Display ONLY the currently selected category tab
+	s.WriteString(titleStyle.Render("TaskManager"))
+	s.WriteString(" ")
 
-	for i, tab := range tabs {
-		tabLabel := tab
-		// Count matching tasks for tab
-		count := m.countForTab(i)
-		tabLabel = fmt.Sprintf("%s (%d)", tab, count)
+	currentTabName := tabs[m.activeTab]
+	currentTabCount := m.countForTab(m.activeTab)
+	selectedTabBanner := fmt.Sprintf("Category: %s (%d tasks)", currentTabName, currentTabCount)
+	s.WriteString(activeTabStyle.Render(selectedTabBanner))
+	s.WriteString(" ")
 
-		if i == m.activeTab {
-			s.WriteString(activeTabStyle.Render(tabLabel))
-		} else {
-			s.WriteString(tabStyle.Render(tabLabel))
-		}
-		s.WriteString(" ")
-	}
-
-	// Sort & scroll indicator on top right
-	scrollInfo := ""
+	// Range and sort info
+	rangeInfo := ""
 	if len(m.tasks) > 0 {
 		visibleEnd := min(len(m.tasks), m.scrollOffset+m.availableRows())
-		scrollInfo = fmt.Sprintf(" [%d-%d/%d | %s]", m.scrollOffset+1, visibleEnd, len(m.tasks), m.sortOrder.Label())
+		rangeInfo = fmt.Sprintf("[%d-%d of %d] • Sort: %s", m.scrollOffset+1, visibleEnd, len(m.tasks), m.sortOrder.Label())
+	} else {
+		rangeInfo = fmt.Sprintf("[0 tasks] • Sort: %s", m.sortOrder.Label())
 	}
-	s.WriteString(helpStyle.Render(scrollInfo))
+	s.WriteString(helpStyle.Render(rangeInfo))
 	s.WriteString("\n\n")
 
-	// 2. Search bar
+	// 2. Search bar if open
 	if m.viewMode == ModeSearch {
 		s.WriteString(fmt.Sprintf("Search: %s█\n\n", m.searchQuery))
 	} else if m.searchQuery != "" {
 		s.WriteString(fmt.Sprintf("Filter: '%s' (press / to edit, esc to clear)\n\n", m.searchQuery))
 	}
 
-	// 3. Modal Views
-	if m.viewMode == ModeHelp {
-		return m.renderHelpModal()
-	}
-
+	// 3. Other modals
 	if m.viewMode == ModeBlockInput {
 		t := m.tasks[m.cursor]
 		s.WriteString(fmt.Sprintf("Enter block reason for #%d '%s': %s█\n(press Enter to confirm, Esc to cancel)\n\n",
@@ -615,10 +640,20 @@ func (m Model) View() string {
 		return s.String()
 	}
 
-	// 4. Task Table Headers with exact cell widths
-	titleWidth := max(20, m.width-colMarkWidth-colIDWidth-colStatusWidth-colPriWidth-colProjectWidth-colTagsWidth-colDepsWidth-colCreatedWidth-18)
+	// 4. Guaranteed Non-Colliding Table Headers
+	// Fixed widths + 2-space gaps between columns
+	fixedColumnsWidth := colMarkWidth + len(colGap) +
+		colIDWidth + len(colGap) +
+		colStatusWidth + len(colGap) +
+		colPriWidth + len(colGap) +
+		colProjectWidth + len(colGap) +
+		colTagsWidth + len(colGap) +
+		colDepsWidth + len(colGap) +
+		colCreatedWidth + len(colGap)
 
-	headerRow := lipgloss.JoinHorizontal(lipgloss.Top,
+	titleWidth := max(20, m.width-fixedColumnsWidth-2)
+
+	headerRow := strings.Join([]string{
 		lipgloss.NewStyle().Width(colMarkWidth).Render(" "),
 		headerCellStyle.Width(colIDWidth).Render("ID"),
 		headerCellStyle.Width(colStatusWidth).Render("Status"),
@@ -628,13 +663,14 @@ func (m Model) View() string {
 		headerCellStyle.Width(colDepsWidth).Render("Deps"),
 		headerCellStyle.Width(colCreatedWidth).Render("Created"),
 		headerCellStyle.Width(titleWidth).Render("Title"),
-	)
-	s.WriteString(headerRow + "\n")
-	s.WriteString(strings.Repeat("-", max(70, m.width-2)) + "\n")
+	}, colGap)
 
-	// 5. Task Rows with Viewport Scrolling
+	s.WriteString(headerRow + "\n")
+	s.WriteString(strings.Repeat("-", max(75, m.width-2)) + "\n")
+
+	// 5. Task Rows with Strict Truncation and Viewport Scrolling
 	if len(m.tasks) == 0 {
-		s.WriteString("  No tasks found in this view.\n")
+		s.WriteString("  No tasks found in this category.\n")
 	} else {
 		visibleRows := m.availableRows()
 		endIdx := min(len(m.tasks), m.scrollOffset+visibleRows)
@@ -650,39 +686,30 @@ func (m Model) View() string {
 
 			statusStr := m.formatStatusText(t)
 			prioStr := m.formatPriorityText(t.Priority)
-			projectStr := truncate(t.Project, colProjectWidth-1)
-			tagsStr := truncate(strings.Join(t.Tags, ","), colTagsWidth-1)
+			projectStr := truncate(t.Project, colProjectWidth)
+			tagsStr := truncate(strings.Join(t.Tags, ","), colTagsWidth)
 
 			var depList []string
 			for _, d := range t.Dependencies {
 				depList = append(depList, strconv.FormatInt(d, 10))
 			}
-			depsStr := truncate(strings.Join(depList, ","), colDepsWidth-1)
-			createdStr := formatAge(t.CreatedAt)
-			titleStr := truncate(t.Title, titleWidth-1)
+			depsStr := truncate(strings.Join(depList, ","), colDepsWidth)
 
-			// Render each column with exact width
-			markCell := lipgloss.NewStyle().Width(colMarkWidth).Render(cursorMark)
-			idCell := lipgloss.NewStyle().Width(colIDWidth).Render(strconv.FormatInt(t.ID, 10))
-			statusCell := lipgloss.NewStyle().Width(colStatusWidth).Render(statusStr)
-			priCell := lipgloss.NewStyle().Width(colPriWidth).Render(prioStr)
-			projectCell := lipgloss.NewStyle().Width(colProjectWidth).Render(projectStr)
-			tagsCell := lipgloss.NewStyle().Width(colTagsWidth).Render(tagsStr)
-			depsCell := lipgloss.NewStyle().Width(colDepsWidth).Render(depsStr)
-			createdCell := lipgloss.NewStyle().Width(colCreatedWidth).Render(createdStr)
-			titleCell := lipgloss.NewStyle().Width(titleWidth).Render(titleStr)
+			// Requirement 5: Human readable timestamp e.g. "2026-10-24 14:15"
+			createdStr := t.CreatedAt.Local().Format("2006-01-02 15:04")
+			titleStr := truncate(t.Title, titleWidth)
 
-			rowLine := lipgloss.JoinHorizontal(lipgloss.Top,
-				markCell,
-				idCell,
-				statusCell,
-				priCell,
-				projectCell,
-				tagsCell,
-				depsCell,
-				createdCell,
-				titleCell,
-			)
+			rowLine := strings.Join([]string{
+				lipgloss.NewStyle().Width(colMarkWidth).Render(cursorMark),
+				lipgloss.NewStyle().Width(colIDWidth).Render(strconv.FormatInt(t.ID, 10)),
+				lipgloss.NewStyle().Width(colStatusWidth).Render(statusStr),
+				lipgloss.NewStyle().Width(colPriWidth).Render(prioStr),
+				lipgloss.NewStyle().Width(colProjectWidth).Render(projectStr),
+				lipgloss.NewStyle().Width(colTagsWidth).Render(tagsStr),
+				lipgloss.NewStyle().Width(colDepsWidth).Render(depsStr),
+				lipgloss.NewStyle().Width(colCreatedWidth).Render(createdStr),
+				lipgloss.NewStyle().Width(titleWidth).Render(titleStr),
+			}, colGap)
 
 			if isSelected {
 				s.WriteString(selectedRowStyle.Render(rowLine) + "\n")
@@ -692,46 +719,79 @@ func (m Model) View() string {
 		}
 	}
 
-	// 6. Status message bar
+	// 6. Status line & Controls info hidden from main view (Requirement 3)
 	s.WriteString("\n")
 	if m.statusMsg != "" {
-		s.WriteString("Status: " + m.statusMsg + "\n")
+		s.WriteString("Status: " + m.statusMsg)
 	}
-
-	// 7. Footer summary
-	s.WriteString(helpStyle.Render("Controls: j/k: nav • a: add • e: edit • Enter: start • x: done • b: block • s: sort • h: help (all controls) • q: quit"))
 
 	return s.String()
 }
 
-func (m Model) renderHelpModal() string {
-	helpText := `TaskManager TUI — Complete Controls Reference
+// Requirement 4: Full window control popup with vertical scrolling
+func (m Model) renderFullScreenHelp() string {
+	rawHelpLines := []string{
+		"================================================================================",
+		"                       TaskManager TUI Controls & Help                          ",
+		"================================================================================",
+		"",
+		"NAVIGATION & SCROLLING:",
+		"  j, Down              Move cursor down",
+		"  k, Up                Move cursor up",
+		"  g, Home              Jump to top of task list",
+		"  G, End               Jump to bottom of task list",
+		"  PgUp, PgDown         Scroll task list by page",
+		"  Tab                  Next category tab",
+		"  Shift+Tab            Previous category tab",
+		"  1 - 6                Jump directly to category (All, Ready, Pending, InProg, Blocked, Done)",
+		"",
+		"TASK EDITING & ACTIONS (vit-style):",
+		"  a, c                 Create new task using $EDITOR (vim/nano)",
+		"  e                    Edit task in $EDITOR (modifies fields and observation history)",
+		"  Enter                Start task (marks in_progress & active)",
+		"  x                    Mark task completed (done)",
+		"  b                    Block task (prompts for blocker reason)",
+		"  v                    View task observation notes modal",
+		"",
+		"OBSERVATION HISTORY EDITING (in editor):",
+		"  • In the editor (e), existing notes appear as 'Note <id>: <content>'.",
+		"  • Edit the text of any line to update that observation.",
+		"  • Delete a note line (e.g. 'dd' in vim) or clear its text to delete that note.",
+		"  • Write under 'New Note:' to append a new observation.",
+		"",
+		"FILTERING & SORTING:",
+		"  /                    Search / filter by text, +tag, +READY, +BLOCKED, project:x, pri:H",
+		"  s                    Cycle column sort (ID, Priority, Created, Status, Project, Title)",
+		"",
+		"WINDOW CONTROLS:",
+		"  h, ?                 Toggle this help window",
+		"  Esc, Enter, q        Close this help window and return to task list",
+		"  Ctrl+C               Quit TaskManager TUI",
+		"",
+		"================================================================================",
+		"                 Use j/k or Up/Down to scroll • Esc/Enter/h to close            ",
+		"================================================================================",
+	}
 
-Navigation:
-  j, k, ↓, ↑        Move cursor down / up
-  g, Home           Jump to top
-  G, End            Jump to bottom
-  PgUp, PgDown      Scroll page up / down
-  Tab / Shift+Tab   Cycle through status tabs
-  1 - 6             Jump directly to tab (1:All, 2:Ready, 3:Pending, 4:InProg, 5:Blocked, 6:Done)
+	visibleHeight := max(5, m.height-2)
+	maxOffset := max(0, len(rawHelpLines)-visibleHeight)
+	if m.helpScrollOffset > maxOffset {
+		m.helpScrollOffset = maxOffset
+	}
 
-Task Actions (vit-style):
-  a, c              Create new task using $EDITOR (vim/nano)
-  e                 Edit selected task in $EDITOR (modify title, status, tags, deps, notes)
-  Enter             Start task (marks in_progress & active)
-  x                 Mark task completed (done)
-  b                 Block task (prompts for blocker reason)
-  v                 View task notes / observations modal
+	endIdx := min(len(rawHelpLines), m.helpScrollOffset+visibleHeight)
+	visibleLines := rawHelpLines[m.helpScrollOffset:endIdx]
 
-Filtering & Sorting:
-  /                 Search / filter by text, +tag, +READY, +BLOCKED, project:x, pri:H
-  s                 Cycle column sorting (ID, Priority, Created, Status, Project, Title)
-  h, ?              Open this help window
-  q, Ctrl+C         Quit TaskManager TUI
+	boxWidth := max(40, m.width-4)
+	content := strings.Join(visibleLines, "\n")
 
-Press Esc, Enter, or h to return to tasks`
+	fullBoxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("62")).
+		Width(boxWidth).
+		Height(visibleHeight)
 
-	return modalBoxStyle.Render(helpText)
+	return fullBoxStyle.Render(content)
 }
 
 func (m Model) countForTab(tabIdx int) int {
@@ -805,33 +865,19 @@ func (m Model) formatPriorityText(p model.TaskPriority) string {
 	}
 }
 
+// Requirement 6: Strict truncation with "..."
 func truncate(s string, maxLen int) string {
 	if maxLen <= 0 {
 		return ""
 	}
 	runes := []rune(s)
 	if len(runes) > maxLen {
-		if maxLen > 2 {
-			return string(runes[:maxLen-2]) + ".."
+		if maxLen > 3 {
+			return string(runes[:maxLen-3]) + "..."
 		}
 		return string(runes[:maxLen])
 	}
 	return s
-}
-
-func formatAge(t time.Time) string {
-	d := time.Since(t)
-	if d < time.Minute {
-		return fmt.Sprintf("%ds", int(d.Seconds()))
-	}
-	if d < time.Hour {
-		return fmt.Sprintf("%dm", int(d.Minutes()))
-	}
-	if d < 24*time.Hour {
-		return fmt.Sprintf("%dh", int(d.Hours()))
-	}
-	days := int(d.Hours() / 24)
-	return fmt.Sprintf("%dd", days)
 }
 
 func Run(st *store.Store) error {

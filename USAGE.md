@@ -296,23 +296,25 @@ Concludes the active session cleanly and declares next steps.
 Full-screen interactive terminal dashboard built with Bubbletea and Lipgloss with an experience inspired by Taskwarrior and `vit`.
 
 * **Launch:** `tm tui`
-* **Column Layout (Pixel-Perfect Visual Alignment):**
+* **Column Layout (Pixel-Perfect Visual Alignment & Collision Prevention):**
   - `ID`: Task auto-increment identifier
   - `Status`: Current status (`pending`, `in_progress`, `blocked`, `completed`, `cancelled`) with active indicator (`in_prog*`)
   - `Pri`: Priority (`C`, `H`, `M`, `L`)
   - `Project`: Project slug
-  - `Tags`: User-defined labels
+  - `Tags`: User-defined labels (truncated with `...` if exceeding column width)
   - `Deps`: Prerequisite task dependencies
-  - `Created`: Elapsed time since task creation (`Age`, e.g. `2m`, `3h`, `5d`)
-  - `Title`: Task description/title
+  - `Created`: Human-readable timestamp formatted as `YYYY-MM-DD HH:MM` (e.g. `2026-10-24 14:15`)
+  - `Title`: Task description/title (truncated with `...` if exceeding available terminal width)
 
-* **Keyboard Navigation & Actions:**
+* **Clean Layout & Navigation:**
+  - Header displays the currently active category (`Category: <Name> (<count> tasks)`) to maximize viewing area.
+  - Bottom controls bar is kept minimal/hidden to avoid clutter; press `h` or `?` to open the **full-screen scrollable controls window** (with `j`/`k`, `Up`/`Down`, `PgUp`/`PgDown`, `g`/`G` navigation).
   - `j` / `k` or `Down` / `Up`: Navigate task list (with automatic viewport scrolling)
   - `g` / `Home`: Jump to top of task list
   - `G` / `End`: Jump to bottom of task list
   - `PgUp` / `PgDown`: Scroll page up / down
-  - `Tab` / `Shift+Tab`: Cycle through tabs (`All`, `Ready`, `Pending`, `In Progress`, `Blocked`, `Completed`)
-  - `1` - `6`: Jump directly to tab
+  - `Tab` / `Shift+Tab`: Cycle through categories (`All`, `Ready`, `Pending`, `In Progress`, `Blocked`, `Completed`)
+  - `1` - `6`: Jump directly to category
   - `a` or `c`: **Create new task** using `$EDITOR`
   - `e`: **Edit selected task** in `$EDITOR`
   - `Enter`: Start task (`in_progress` & `active`)
@@ -321,24 +323,20 @@ Full-screen interactive terminal dashboard built with Bubbletea and Lipgloss wit
   - `v`: Open observation / technical notes history modal
   - `/`: Enhanced search & filter (`+tag`, `+READY`, `+BLOCKED`, `project:x`, `pri:H`, text)
   - `s`: Cycle column sorting (`ID ▲`, `Pri ▼`, `Created ▼`, `Status ▲`, `Project ▲`, `Title ▲`)
-  - `h` or `?`: **Open complete controls & shortcuts help window**
+  - `h` or `?`: **Open complete full-screen controls & shortcuts help window**
   - `q` or `Ctrl+C`: Exit TUI
 
 #### Editor Integration (`$EDITOR` / `vit`-Style Editing):
 When pressing `a` (create) or `e` (edit), `tm tui` suspends the terminal and opens `$EDITOR` (or `$VISUAL`, defaulting to `vim` / `nano` / `vi`).
 
-In edit mode (`e`), the editor displays **read-only task metadata and historical notes** at the top, followed by the editable fields and an optional note entry field:
+In edit mode (`e`), the editor displays **read-only task metadata** at the top, followed by editable task fields, existing observation notes (which can be edited or deleted), and a prompt for adding a new note:
 
 ```text
 # ==============================================================================
-# READ-ONLY TASK METADATA & NOTE HISTORY: Task #1
-# Created: 2026-10-24 10:18:28 (2h ago) | Updated: 11:02:15
+# READ-ONLY TASK METADATA: Task #1
+# Created: 2026-10-24 10:18:28 | Updated: 2026-10-24 11:02:15
 # Virtual Tags: ACTIVE, READY, UNBLOCKED
 # Dependencies: #2 (completed)
-#
-# OBSERVATION & NOTE HISTORY (2 recorded):
-#   • [2026-10-24 10:25:01] ASan detects heap-use-after-free in parser line 42
-#   • [2026-10-24 11:02:15] Completed reproduction unit test in tests/test_parser.c
 # ==============================================================================
 # EDITABLE TASK FIELDS (Save and close editor to commit changes)
 # Valid Statuses: pending, in_progress, blocked, completed, cancelled
@@ -352,6 +350,13 @@ Tags: math, compiler
 Depends: 2
 Blocker Reason: 
 
+# ==============================================================================
+# OBSERVATIONS & NOTES (Edit note text to update, or delete line to remove)
+# Total recorded: 2
+# ==============================================================================
+Note 1: ASan detects heap-use-after-free in parser line 42
+Note 2: Completed reproduction unit test in tests/test_parser.c
+
 # Add a new observation/note to task history upon saving:
 New Note: Found that IEEE 754 overflow traps can be avoided with flag checks
 
@@ -360,7 +365,11 @@ Description:
 Verify divide-by-zero returns error code and test with ASan.
 ```
 
-Saving and closing the editor immediately updates the task, appends the new note (if provided) into the FTS5-indexed observation history, updates the session checkpoint, and refreshes the TUI. Exiting without a title cancels the operation.
+Saving and closing the editor immediately updates the task:
+- Modifying the text of a `Note <id>:` line updates the observation in SQLite and FTS5 search index.
+- Deleting a `Note <id>:` line removes that observation from the database.
+- Entering text under `New Note:` records a new observation timestamped to the current session.
+- Exiting without a title cancels the operation.
 
 #### Virtual Tags (Taskwarrior-Style):
 `tm` dynamically computes synthetic virtual tags based on task dependencies and state:

@@ -57,6 +57,38 @@ func (s *Store) GetObservation(ctx context.Context, id int64) (*model.Observatio
 	return scanObservation(row)
 }
 
+func (s *Store) UpdateObservation(ctx context.Context, id int64, content string) error {
+	query := `UPDATE observations SET content = ? WHERE id = ?`
+	res, err := s.db.ExecContext(ctx, query, content, id)
+	if err != nil {
+		return fmt.Errorf("failed to update observation #%d: %w", id, err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) DeleteObservation(ctx context.Context, id int64) error {
+	query := `DELETE FROM observations WHERE id = ?`
+	res, err := s.db.ExecContext(ctx, query, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete observation #%d: %w", id, err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *Store) ListObservations(ctx context.Context, filter ObservationFilter) ([]*model.Observation, error) {
 	query := `
 		SELECT id, session_id, task_id, content, created_at

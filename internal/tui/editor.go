@@ -21,6 +21,7 @@ type ParsedTask struct {
 	Dependencies  []int64
 	Description   string
 	NewNote       string
+	ExistingNotes map[int64]string // parsed existing notes (id -> content)
 }
 
 func FormatNewTaskTemplate(defaultProject string) string {
@@ -53,11 +54,10 @@ func FormatNewTaskTemplate(defaultProject string) string {
 func FormatEditTaskTemplate(t *model.Task, allTasks []*model.Task, observations []*model.Observation) string {
 	var sb strings.Builder
 	sb.WriteString("# ==============================================================================\n")
-	sb.WriteString(fmt.Sprintf("# READ-ONLY TASK METADATA & NOTE HISTORY: Task #%d\n", t.ID))
-	sb.WriteString(fmt.Sprintf("# Created: %s (%s ago) | Updated: %s\n",
+	sb.WriteString(fmt.Sprintf("# READ-ONLY TASK METADATA: Task #%d\n", t.ID))
+	sb.WriteString(fmt.Sprintf("# Created: %s | Updated: %s\n",
 		t.CreatedAt.Local().Format("2006-01-02 15:04:05"),
-		formatAge(t.CreatedAt),
-		t.UpdatedAt.Local().Format("15:04:05"),
+		t.UpdatedAt.Local().Format("2006-01-02 15:04:05"),
 	))
 
 	// Virtual tags
@@ -79,16 +79,6 @@ func FormatEditTaskTemplate(t *model.Task, allTasks []*model.Task, observations 
 		}
 		sb.WriteString(fmt.Sprintf("# Dependencies: %s\n", strings.Join(depStrs, ", ")))
 	}
-
-	sb.WriteString("#\n")
-	sb.WriteString(fmt.Sprintf("# OBSERVATION & NOTE HISTORY (%d recorded):\n", len(observations)))
-	if len(observations) == 0 {
-		sb.WriteString("#   (No observations recorded yet)\n")
-	} else {
-		for _, o := range observations {
-			sb.WriteString(fmt.Sprintf("#   • [%s] %s\n", o.CreatedAt.Local().Format("2006-01-02 15:04:05"), o.Content))
-		}
-	}
 	sb.WriteString("# ==============================================================================\n")
 	sb.WriteString("# EDITABLE TASK FIELDS (Save and close editor to commit changes)\n")
 	sb.WriteString("# Valid Statuses: pending, in_progress, blocked, completed, cancelled\n")
@@ -106,6 +96,15 @@ func FormatEditTaskTemplate(t *model.Task, allTasks []*model.Task, observations 
 	}
 	sb.WriteString(fmt.Sprintf("Depends: %s\n", strings.Join(depList, ", ")))
 	sb.WriteString(fmt.Sprintf("Blocker Reason: %s\n", t.BlockerReason))
+	sb.WriteString("\n")
+
+	sb.WriteString("# ==============================================================================\n")
+	sb.WriteString("# OBSERVATIONS & NOTES (Edit note text to update, or delete line to remove)\n")
+	sb.WriteString(fmt.Sprintf("# Total recorded: %d\n", len(observations)))
+	sb.WriteString("# ==============================================================================\n")
+	for _, o := range observations {
+		sb.WriteString(fmt.Sprintf("Note %d: %s\n", o.ID, o.Content))
+	}
 	sb.WriteString("\n")
 	sb.WriteString("# Add a new observation/note to task history upon saving:\n")
 	sb.WriteString("New Note: \n")
@@ -127,6 +126,7 @@ func ParseTaskTemplate(content string) (ParsedTask, error) {
 	res.Status = model.StatusPending
 	res.Tags = []string{}
 	res.Dependencies = []int64{}
+	res.ExistingNotes = make(map[int64]string)
 
 	scanner := bufio.NewScanner(strings.NewReader(content))
 	inDescription := false
@@ -160,6 +160,17 @@ func ParseTaskTemplate(content string) (ParsedTask, error) {
 
 		key := strings.ToLower(strings.TrimSpace(line[:colonIdx]))
 		val := strings.TrimSpace(line[colonIdx+1:])
+
+		// Check for "note <id>" or "observation <id>"
+		if strings.HasPrefix(key, "note ") || strings.HasPrefix(key, "observation ") {
+			fields := strings.Fields(key)
+			if len(fields) >= 2 {
+				if id, err := strconv.ParseInt(fields[1], 10, 64); err == nil {
+					res.ExistingNotes[id] = val
+					continue
+				}
+			}
+		}
 
 		switch key {
 		case "title":
@@ -206,7 +217,7 @@ func ParseTaskTemplate(content string) (ParsedTask, error) {
 			}
 		case "blocker reason", "blocker", "block_reason":
 			res.BlockerReason = val
-		case "new note", "note", "observation":
+		case "new note", "new observation":
 			res.NewNote = val
 		case "description":
 			inDescription = true

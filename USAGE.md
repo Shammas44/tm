@@ -95,7 +95,7 @@ tm 1 start
 ```text
 Started task #1: Implement division error handling
 ```
-Task `#1` is now marked `in_progress` and flagged as the active task in the session checkpoint.
+Task `#1` is now marked `started` and flagged as the active task in the session checkpoint.
 
 ### Step 5: Record technical findings & observations
 Persist technical discoveries, memory invariants, or compiler findings directly linked to the task:
@@ -206,7 +206,7 @@ Initializes a new session, auto-detects crashed or interrupted sessions, and res
     "active_task": {
       "id": 1,
       "title": "Implement division error handling",
-      "status": "in_progress",
+      "status": "started",
       "priority": "H",
       "project": "calc",
       "active": true
@@ -217,7 +217,7 @@ Initializes a new session, auto-detects crashed or interrupted sessions, and res
     ],
     "backlog": {
       "pending": 3,
-      "in_progress": 1,
+      "started": 1,
       "blocked": 0,
       "completed": 5
     }
@@ -260,11 +260,11 @@ Creates a new task in the backlog.
 ### `tm list` / `tm ls`
 Lists tasks with optional status and priority filters.
 
-* **Usage:** `tm list [status:pending|in_progress|blocked|completed] [priority:H|M|L|C] [project:<slug>] [--all] [--json]`
+* **Usage:** `tm list [status:pending|started|blocked|completed] [priority:H|M|L|C] [project:<slug>] [--all] [--json]`
 * **Examples:**
   ```bash
   tm ls
-  tm ls in_progress
+  tm ls started
   tm ls priority:H
   tm ls --all
   ```
@@ -276,7 +276,7 @@ Lists tasks with optional status and priority filters.
 Fast CLI commands providing full parity with TUI operations:
 
 * **Start task:** `tm <id> start` (or `tm start <id>`)  
-  Sets status to `in_progress`, marks `active = 1`, and unsets active on all other tasks.
+  Sets status to `started`, marks `active = 1`, and unsets active on all other tasks.
 * **Complete task:** `tm <id> done` (or `tm done <id>`)  
   Sets status to `completed`, sets `completed_at`, unsets active, and records a completion observation.
 * **Block task:** `tm <id> block "<blocker>"` (or `tm block <id> "<blocker>"`)  
@@ -321,8 +321,8 @@ Queries the current project state without initiating a new working session or mu
   ```text
   === TaskManager Project Status ===
   Active Session:  80ed5772-3a0c-42c4-8f73-668fe1486ab9 (agent: claude-opus, started: 25m ago)
-  Active Task:     #42 Implement session table in TUI [in_progress]
-  Backlog Status:  1 pending, 1 in progress, 0 blocked, 18 completed (20 total)
+  Active Task:     #42 Implement session table in TUI [started]
+  Backlog Status:  1 pending, 1 started, 0 blocked, 18 completed (20 total)
   Last Checkpoint: Refactored database queries
   Last Handoff:    Next step: add caching
   ```
@@ -506,14 +506,14 @@ In edit mode (`e`), the editor displays **read-only task metadata comments** at 
 # Dependencies: #2 (completed)
 # ==============================================================================
 # EDITABLE TASK DEFINITION (Save and close editor to commit changes)
-# Valid Statuses: pending, in_progress, blocked, completed, cancelled
+# Valid Statuses: pending, started, blocked, completed, cancelled
 # Valid Priorities: L, M, H, C
 # Notes: modify existing IDs, delete lines to remove, or add new keys/notes freely
 # Multi-line fields (blocker, description, notes): use '|-' format
 # ==============================================================================
 
 title: Implement multiplication error handling
-status: in_progress
+status: started
 priority: H
 project: calc
 tags:

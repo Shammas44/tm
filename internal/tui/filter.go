@@ -67,8 +67,8 @@ func MatchesFilter(t *model.Task, allTasks []*model.Task, hasNotes bool, c Filte
 	// 4. Status filter
 	if c.Status != "" {
 		sLower := strings.ToLower(string(t.Status))
-		if c.Status == "active" {
-			c.Status = "in_progress"
+		if c.Status == "active" || c.Status == "in_progress" {
+			c.Status = "started"
 		}
 		if sLower != c.Status {
 			return false

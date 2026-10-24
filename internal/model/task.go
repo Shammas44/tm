@@ -6,10 +6,13 @@ type TaskStatus string
 
 const (
 	StatusPending    TaskStatus = "pending"
-	StatusInProgress TaskStatus = "in_progress"
+	StatusStarted    TaskStatus = "started"
 	StatusCompleted  TaskStatus = "completed"
 	StatusBlocked    TaskStatus = "blocked"
 	StatusCancelled  TaskStatus = "cancelled"
+
+	// Deprecated: use StatusStarted
+	StatusInProgress = StatusStarted
 )
 
 type TaskPriority string

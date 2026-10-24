@@ -262,7 +262,7 @@ func formatAge(t time.Time) string {
 
 func formatStatus(s model.TaskStatus) string {
 	switch s {
-	case model.StatusInProgress:
+	case model.StatusStarted:
 		return inProgressStyle.Render(string(s))
 	case model.StatusCompleted:
 		return completedStyle.Render(string(s))

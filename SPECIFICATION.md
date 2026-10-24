@@ -49,7 +49,7 @@ Called at the beginning of an agent turn or when a developer sits down to resume
     "active_task": {
       "id": 3,
       "title": "Add unit tests for divide-by-zero",
-      "status": "in_progress",
+      "status": "started",
       "priority": "H",
       "project": "c-dev"
     },
@@ -59,7 +59,7 @@ Called at the beginning of an agent turn or when a developer sits down to resume
     ],
     "backlog": {
       "pending": 4,
-      "in_progress": 1,
+      "started": 1,
       "blocked": 0,
       "completed": 6
     }
@@ -85,7 +85,7 @@ Creates a new task.
 ### Command 3: `tm list` / `tm ls`
 Lists tasks with optional filtering.
 
-* **Usage**: `tm list [status:pending|in_progress|blocked|completed] [priority:H|M|L|C] [project:<slug>] [--json]`
+* **Usage**: `tm list [status:pending|started|blocked|completed] [priority:H|M|L|C] [project:<slug>] [--json]`
 * **Human Output**: Concise ASCII/ANSI table with columns: `ID`, `Status`, `Pri`, `Project`, `Title`, `Age`.
 * **JSON Output**: Array of task objects.
 
@@ -95,7 +95,7 @@ Lists tasks with optional filtering.
 Positional commands to update task status quickly.
 
 #### `tm <id> start`
-Marks task `<id>` as `in_progress` and flags it as the current `active` task.
+Marks task `<id>` as `started` and flags it as the current `active` task.
 ```bash
 tm 3 start
 ```
@@ -176,7 +176,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
     description TEXT DEFAULT '',
-    status TEXT NOT NULL CHECK(status IN ('pending', 'in_progress', 'completed', 'blocked', 'cancelled')),
+    status TEXT NOT NULL CHECK(status IN ('pending', 'started', 'in_progress', 'completed', 'blocked', 'cancelled')),
     priority TEXT NOT NULL CHECK(priority IN ('L', 'M', 'H', 'C')),
     project TEXT DEFAULT '',
     active INTEGER DEFAULT 0,

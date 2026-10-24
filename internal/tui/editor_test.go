@@ -59,7 +59,7 @@ func TestParseEditTaskTemplateWithObservations(t *testing.T) {
 	task := &model.Task{
 		ID:           42,
 		Title:        "Fix memory leak in pool",
-		Status:       model.StatusInProgress,
+		Status:       model.StatusStarted,
 		Priority:     model.PriorityCritical,
 		Project:      "engine",
 		Blocker:      "Waiting for valgrind run",
@@ -169,7 +169,7 @@ description: |-
 
 func TestParseMultiLineObservations(t *testing.T) {
 	input := `Title: Memory leak diagnosis
-Status: in_progress
+Status: started
 Priority: H
 
 Note 1: Initial leak detected

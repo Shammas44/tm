@@ -222,7 +222,7 @@ func TestTopAndBottomStatusLines(t *testing.T) {
 	task := &model.Task{
 		ID:       1,
 		Title:    "Test Task",
-		Status:   model.StatusInProgress,
+		Status:   model.StatusStarted,
 		Active:   true,
 		Priority: model.PriorityHigh,
 	}

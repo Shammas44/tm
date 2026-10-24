@@ -68,8 +68,8 @@ func TestTaskCRUDAndStateTransitions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetActiveTask failed: %v", err)
 	}
-	if active.ID != 1 || !active.Active || active.Status != model.StatusInProgress {
-		t.Errorf("expected active task #1 in progress, got: %+v", active)
+	if active.ID != 1 || !active.Active || active.Status != model.StatusStarted {
+		t.Errorf("expected active task #1 started, got: %+v", active)
 	}
 
 	// 3. Block task
@@ -103,7 +103,7 @@ func TestTaskCRUDAndStateTransitions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetBacklogCounts failed: %v", err)
 	}
-	if counts.Pending != 1 || counts.Completed != 1 || counts.InProgress != 0 || counts.Blocked != 0 {
+	if counts.Pending != 1 || counts.Completed != 1 || counts.Started != 0 || counts.Blocked != 0 {
 		t.Errorf("unexpected backlog counts: %+v", counts)
 	}
 }

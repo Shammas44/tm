@@ -104,7 +104,7 @@ func FormatEditTaskTemplate(t *model.Task, allTasks []*model.Task, observations 
 	}
 	sb.WriteString("# ==============================================================================\n")
 	sb.WriteString("# EDITABLE TASK DEFINITION (Save and close editor to commit changes)\n")
-	sb.WriteString("# Valid Statuses: pending, in_progress, blocked, completed, cancelled\n")
+	sb.WriteString("# Valid Statuses: pending, started, blocked, completed, cancelled\n")
 	sb.WriteString("# Valid Priorities: L, M, H, C\n")
 	sb.WriteString("# Notes: modify existing IDs, delete lines to remove, or add new keys/notes freely\n")
 	sb.WriteString("# Multi-line fields (blocker, description, notes): use '|-' format\n")
@@ -168,8 +168,8 @@ func ParseTaskTemplate(content string) (ParsedTask, error) {
 		res.Title = strings.TrimSpace(raw.Title)
 		if raw.Status != "" {
 			valLower := strings.ToLower(strings.TrimSpace(raw.Status))
-			if valLower == "active" {
-				valLower = "in_progress"
+			if valLower == "active" || valLower == "in_progress" {
+				valLower = "started"
 			}
 			res.Status = model.TaskStatus(valLower)
 		}
@@ -431,8 +431,8 @@ func parseLegacyTaskTemplate(content string) (ParsedTask, error) {
 			res.Title = val
 		case "status":
 			valLower := strings.ToLower(val)
-			if valLower == "active" {
-				valLower = "in_progress"
+			if valLower == "active" || valLower == "in_progress" {
+				valLower = "started"
 			}
 			if valLower != "" {
 				res.Status = model.TaskStatus(valLower)

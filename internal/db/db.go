@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -46,6 +47,40 @@ func Open(dbPath string) (*sql.DB, error) {
 	_, _ = db.Exec("ALTER TABLE sessions ADD COLUMN handoff TEXT DEFAULT ''")
 	_, _ = db.Exec("CREATE INDEX IF NOT EXISTS idx_sessions_started ON sessions(started_at DESC)")
 	_, _ = db.Exec("UPDATE sessions SET handoff = summary WHERE (handoff = '' OR handoff IS NULL) AND (summary != '' AND summary IS NOT NULL)")
+
+	// Migrate tasks table check constraint to support 'started' if needed
+	var tasksSQL string
+	err = db.QueryRow("SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'").Scan(&tasksSQL)
+	if err == nil && !strings.Contains(tasksSQL, "'started'") {
+		migration := `
+			PRAGMA foreign_keys = OFF;
+			CREATE TABLE IF NOT EXISTS tasks_new (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				title TEXT NOT NULL,
+				description TEXT DEFAULT '',
+				status TEXT NOT NULL CHECK(status IN ('pending', 'started', 'in_progress', 'completed', 'blocked', 'cancelled')),
+				priority TEXT NOT NULL CHECK(priority IN ('L', 'M', 'H', 'C')),
+				project TEXT DEFAULT '',
+				active INTEGER DEFAULT 0,
+				blocker TEXT DEFAULT '',
+				tags TEXT DEFAULT '[]',
+				dependencies TEXT DEFAULT '[]',
+				created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+				updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+				completed_at TIMESTAMP
+			);
+			INSERT INTO tasks_new (id, title, description, status, priority, project, active, blocker, tags, dependencies, created_at, updated_at, completed_at)
+			SELECT id, title, description, CASE WHEN status = 'in_progress' THEN 'started' ELSE status END, priority, project, active, blocker, tags, dependencies, created_at, updated_at, completed_at FROM tasks;
+			DROP TABLE tasks;
+			ALTER TABLE tasks_new RENAME TO tasks;
+			CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+			CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project);
+			CREATE INDEX IF NOT EXISTS idx_tasks_active ON tasks(active);
+			PRAGMA foreign_keys = ON;
+		`
+		_, _ = db.Exec(migration)
+	}
+	_, _ = db.Exec("UPDATE tasks SET status = 'started' WHERE status = 'in_progress'")
 
 	return db, nil
 }

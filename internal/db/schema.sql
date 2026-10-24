@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
     description TEXT DEFAULT '',
-    status TEXT NOT NULL CHECK(status IN ('pending', 'in_progress', 'completed', 'blocked', 'cancelled')),
+    status TEXT NOT NULL CHECK(status IN ('pending', 'started', 'in_progress', 'completed', 'blocked', 'cancelled')),
     priority TEXT NOT NULL CHECK(priority IN ('L', 'M', 'H', 'C')),
     project TEXT DEFAULT '',
     active INTEGER DEFAULT 0,

@@ -39,8 +39,8 @@ var listCmd = &cobra.Command{
 			if argLower == "all" {
 				filter.IncludeDeleted = true
 				filter.Status = ""
-			} else if argLower == "active" || argLower == "in_progress" {
-				filter.Status = model.StatusInProgress
+			} else if argLower == "active" || argLower == "started" || argLower == "in_progress" {
+				filter.Status = model.StatusStarted
 			} else if argLower == "pending" || argLower == "completed" || argLower == "blocked" || argLower == "cancelled" {
 				filter.Status = model.TaskStatus(argLower)
 			} else if strings.HasPrefix(argLower, "priority:") || strings.HasPrefix(argLower, "p:") {
@@ -52,8 +52,8 @@ var listCmd = &cobra.Command{
 			} else if strings.HasPrefix(argLower, "status:") || strings.HasPrefix(argLower, "s:") {
 				parts := strings.SplitN(arg, ":", 2)
 				val := strings.ToLower(parts[1])
-				if val == "active" {
-					val = "in_progress"
+				if val == "active" || val == "in_progress" {
+					val = "started"
 				}
 				filter.Status = model.TaskStatus(val)
 			}
@@ -80,7 +80,7 @@ var listCmd = &cobra.Command{
 }
 
 func init() {
-	listCmd.Flags().StringVarP(&listStatus, "status", "s", "", "Filter by task status (pending, in_progress, blocked, completed)")
+	listCmd.Flags().StringVarP(&listStatus, "status", "s", "", "Filter by task status (pending, started, blocked, completed)")
 	listCmd.Flags().StringVarP(&listPriority, "priority", "p", "", "Filter by task priority (L, M, H, C)")
 	listCmd.Flags().BoolVarP(&listAll, "all", "a", false, "Include completed and cancelled tasks")
 	RootCmd.AddCommand(listCmd)

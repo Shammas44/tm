@@ -20,7 +20,8 @@ type TaskFilter struct {
 
 type BacklogCounts struct {
 	Pending    int `json:"pending"`
-	InProgress int `json:"in_progress"`
+	Started    int `json:"started"`
+	InProgress int `json:"in_progress,omitempty"`
 	Blocked    int `json:"blocked"`
 	Completed  int `json:"completed"`
 }
@@ -117,7 +118,7 @@ func (s *Store) SetActiveTask(ctx context.Context, id int64) error {
 		UPDATE tasks
 		SET active = 1, status = ?, blocker = '', updated_at = ?
 		WHERE id = ?
-	`, string(model.StatusInProgress), now.Format(time.RFC3339), id)
+	`, string(model.StatusStarted), now.Format(time.RFC3339), id)
 	if err != nil {
 		return fmt.Errorf("failed to set active task: %w", err)
 	}
@@ -136,7 +137,7 @@ func (s *Store) UpdateTaskStatus(ctx context.Context, id int64, status model.Tas
 	now := time.Now().UTC()
 	activeInt := 0
 	var completedAt any
-	if status == model.StatusInProgress {
+	if status == model.StatusStarted {
 		activeInt = 1
 	} else if status == model.StatusCompleted {
 		completedAt = now.Format(time.RFC3339)
@@ -323,7 +324,7 @@ func (s *Store) GetBacklogCounts(ctx context.Context, project string) (BacklogCo
 	query := `
 		SELECT
 			COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN status = 'started' OR status = 'in_progress' THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN status = 'blocked' THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END), 0)
 		FROM tasks
@@ -335,10 +336,11 @@ func (s *Store) GetBacklogCounts(ctx context.Context, project string) (BacklogCo
 	}
 	err := s.db.QueryRowContext(ctx, query, args...).Scan(
 		&counts.Pending,
-		&counts.InProgress,
+		&counts.Started,
 		&counts.Blocked,
 		&counts.Completed,
 	)
+	counts.InProgress = counts.Started
 	return counts, err
 }
 

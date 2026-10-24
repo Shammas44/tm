@@ -130,7 +130,7 @@ var initCmd = &cobra.Command{
 		if resp.ActiveTask != nil {
 			statusStr := string(resp.ActiveTask.Status)
 			if resp.ActiveTask.Active {
-				statusStr = "active (in_progress)"
+				statusStr = "active (started)"
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "\nTarget Task: #%d - %s [%s] (%s)\n",
 				resp.ActiveTask.ID, resp.ActiveTask.Title, resp.ActiveTask.Priority, statusStr)
@@ -143,8 +143,8 @@ var initCmd = &cobra.Command{
 			}
 		}
 
-		fmt.Fprintf(cmd.OutOrStdout(), "\nBacklog: %d pending, %d in progress, %d blocked, %d completed\n",
-			resp.Backlog.Pending, resp.Backlog.InProgress, resp.Backlog.Blocked, resp.Backlog.Completed)
+		fmt.Fprintf(cmd.OutOrStdout(), "\nBacklog: %d pending, %d started, %d blocked, %d completed\n",
+			resp.Backlog.Pending, resp.Backlog.Started, resp.Backlog.Blocked, resp.Backlog.Completed)
 
 		return nil
 	},

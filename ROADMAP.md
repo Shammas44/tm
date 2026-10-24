@@ -101,14 +101,14 @@ This document outlines the sequential implementation plan for rewriting **TaskMa
 * **Objective:** Implement `tm add` and `tm list` (alias `tm ls`) with Taskwarrior-style arguments.
 * **Syntax:**
   * `tm add "Implement multiplication" priority:H project:c-calc`
-  * `tm list [status:pending|in_progress|blocked|completed] [priority:H|M|L|C]`
+  * `tm list [status:pending|started|blocked|completed] [priority:H|M|L|C]`
   * `tm ls`
 * **Validation Criteria:** Tasks can be added and listed with accurate filtering in both table and JSON output modes.
 
 ### Slice 2.3: Task State Mutations
 * **Objective:** Fast positional commands to mutate task states.
 * **Syntax:**
-  * `tm <id> start`: sets task status to `in_progress` and marks it active.
+  * `tm <id> start`: sets task status to `started` and marks it active.
   * `tm <id> done`: marks task `completed` and clears active status.
   * `tm <id> block <reason>`: marks task `blocked`, records reason, and unsets active.
   * `tm <id> log <note>`: appends observation to task and records in FTS5 index.

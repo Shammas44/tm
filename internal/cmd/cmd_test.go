@@ -122,8 +122,8 @@ func TestCLICommandsEndToEnd(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &started); err != nil {
 		t.Fatalf("failed to parse JSON from start output: %v (raw: %s)", err, out)
 	}
-	if started.Status != model.StatusInProgress || !started.Active {
-		t.Errorf("expected in_progress status and active=true, got: %+v", started)
+	if started.Status != model.StatusStarted || !started.Active {
+		t.Errorf("expected started status and active=true, got: %+v", started)
 	}
 
 	// 3. Log Observation

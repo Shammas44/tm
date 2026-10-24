@@ -9,7 +9,7 @@ func ComputeVirtualTags(t *Task, allTasks []*Task, hasObservations bool) []strin
 	var vtags []string
 
 	// Status virtual tags
-	if t.Active || t.Status == StatusInProgress {
+	if t.Active || t.Status == StatusStarted {
 		vtags = append(vtags, "ACTIVE")
 	}
 	if t.Status == StatusPending {

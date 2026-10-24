@@ -60,7 +60,11 @@ var editCmd = &cobra.Command{
 				task.Title = editTitle
 			}
 			if cmd.Flags().Changed("status") {
-				task.Status = model.TaskStatus(editStatus)
+				st := strings.ToLower(editStatus)
+				if st == "in_progress" {
+					st = "started"
+				}
+				task.Status = model.TaskStatus(st)
 			}
 			if cmd.Flags().Changed("priority") {
 				task.Priority = model.TaskPriority(strings.ToUpper(editPriority))
@@ -100,7 +104,7 @@ var editCmd = &cobra.Command{
 				task.Dependencies = deps
 			}
 
-			if task.Status == model.StatusInProgress {
+			if task.Status == model.StatusStarted {
 				_ = appStore.SetActiveTask(ctx, task.ID)
 			}
 			if err := appStore.UpdateTask(ctx, task); err != nil {
@@ -178,7 +182,7 @@ var editCmd = &cobra.Command{
 		task.Tags = parsed.Tags
 		task.Dependencies = parsed.Dependencies
 
-		if task.Status == model.StatusInProgress {
+		if task.Status == model.StatusStarted {
 			_ = appStore.SetActiveTask(ctx, task.ID)
 		}
 		if err := appStore.UpdateTask(ctx, task); err != nil {
@@ -233,7 +237,7 @@ var editCmd = &cobra.Command{
 
 func init() {
 	editCmd.Flags().StringVar(&editTitle, "title", "", "Task title")
-	editCmd.Flags().StringVar(&editStatus, "status", "", "Task status (pending, in_progress, blocked, completed, cancelled)")
+	editCmd.Flags().StringVar(&editStatus, "status", "", "Task status (pending, started, blocked, completed, cancelled)")
 	editCmd.Flags().StringVarP(&editPriority, "priority", "p", "", "Task priority (L, M, H, C)")
 	editCmd.Flags().StringVarP(&editProject, "project", "P", "", "Project slug")
 	editCmd.Flags().StringVar(&editDesc, "desc", "", "Task description")

@@ -13,7 +13,7 @@ import (
 
 var startCmd = &cobra.Command{
 	Use:   "start <id>",
-	Short: "Mark a task as in_progress and set as the active task",
+	Short: "Mark a task as started and set as the active task",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()

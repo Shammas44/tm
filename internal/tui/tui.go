@@ -169,7 +169,7 @@ type Model struct {
 	tasks        []*model.Task
 	allTasks     []*model.Task
 	obsCounts    map[int64]int
-	activeTab    int // 0: All, 1: Ready, 2: Pending, 3: In Progress, 4: Blocked, 5: Completed
+	activeTab    int // 0: All, 1: Ready, 2: Pending, 3: Started, 4: Blocked, 5: Completed
 	cursor       int // Selected row index
 	selectedCol  int // Selected column index (0 to TotalColumns-1)
 	scrollOffset int // Top visible row index
@@ -201,7 +201,7 @@ type Model struct {
 	height           int
 }
 
-var tabs = []string{"All", "Ready", "Pending", "In Progress", "Blocked", "Completed"}
+var tabs = []string{"All", "Ready", "Pending", "Started", "Blocked", "Completed"}
 var sessionTabs = []string{"All", "Today", "Active", "Completed", "Interrupted", "Handoff"}
 
 func New(st *store.Store) Model {
@@ -265,8 +265,8 @@ func (m *Model) filterTasks() {
 			if t.Status != model.StatusPending {
 				continue
 			}
-		case 3: // In Progress
-			if t.Status != model.StatusInProgress {
+		case 3: // Started
+			if t.Status != model.StatusStarted {
 				continue
 			}
 		case 4: // Blocked
@@ -529,7 +529,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.statusMsg = fmt.Sprintf("Failed to create task: %v", err)
 				return m, nil
 			}
-			if created.Status == model.StatusInProgress {
+			if created.Status == model.StatusStarted {
 				_ = m.store.SetActiveTask(ctx, created.ID)
 			}
 
@@ -572,7 +572,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				existing.Status = model.StatusBlocked
 			}
 
-			if existing.Status == model.StatusInProgress {
+			if existing.Status == model.StatusStarted {
 				_ = m.store.SetActiveTask(ctx, existing.ID)
 				_ = m.store.UpdateTask(ctx, existing)
 			} else {
@@ -2054,7 +2054,7 @@ func (m Model) helpContentLines() []string {
 		hKey("  s") + hDesc("Sort by selected column (press again to reverse ▲/▼)"),
 		"",
 		hSec("TASK ACTIONS (Tasks View)"),
-		hKey("  Enter") + hDesc("Start task (mark in_progress & active)"),
+		hKey("  Enter") + hDesc("Start task (mark started & active)"),
 		hKey("  x") + hDesc("Complete task (mark done)"),
 		hKey("  b") + hDesc("Block task (prompts for blocker)"),
 		hKey("  d") + hDesc("Delete task permanently (with confirmation)"),
@@ -2142,7 +2142,7 @@ func (m Model) countForTab(tabIdx int) int {
 		case 2:
 			matchTab = t.Status == model.StatusPending
 		case 3:
-			matchTab = t.Status == model.StatusInProgress
+			matchTab = t.Status == model.StatusStarted
 		case 4:
 			matchTab = vtagMap["BLOCKED"]
 		case 5:
@@ -2159,7 +2159,7 @@ func (m Model) countForTab(tabIdx int) int {
 func (m Model) formatStatusText(t *model.Task) string {
 	rawStatus := strings.ToUpper(string(t.Status))
 	switch t.Status {
-	case model.StatusInProgress:
+	case model.StatusStarted:
 		return inProgressStyle.Render(rawStatus)
 	case model.StatusCompleted:
 		return completedStyle.Render(rawStatus)

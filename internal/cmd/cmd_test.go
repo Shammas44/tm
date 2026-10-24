@@ -42,6 +42,21 @@ func TestPreprocessArgs(t *testing.T) {
 			expected: []string{"show", "3"},
 		},
 		{
+			name:     "positional edit",
+			input:    []string{"1", "edit"},
+			expected: []string{"edit", "1"},
+		},
+		{
+			name:     "positional tag",
+			input:    []string{"1", "tag", "+cli", "-old"},
+			expected: []string{"tag", "1", "+cli", "-old"},
+		},
+		{
+			name:     "positional dep",
+			input:    []string{"1", "dep", "5"},
+			expected: []string{"dep", "1", "5"},
+		},
+		{
 			name:     "with flags and positional start",
 			input:    []string{"--json", "2", "start"},
 			expected: []string{"--json", "start", "2"},
@@ -174,5 +189,71 @@ func TestCLICommandsEndToEnd(t *testing.T) {
 	}
 	if len(listResults) != 1 || listResults[0].ID != 1 {
 		t.Errorf("expected 1 task in list, got %d", len(listResults))
+	}
+
+	// 8. Edit Task via Flags
+	out, err = runCmd("edit", "1", "--title", "Updated task title", "--priority", "C", "--tags", "go,cli", "--depends", "2,3")
+	if err != nil {
+		t.Fatalf("tm edit failed: %v, out: %s", err, out)
+	}
+	var edited model.Task
+	if err := json.Unmarshal([]byte(out), &edited); err != nil {
+		t.Fatalf("failed to parse JSON from edit output: %v (raw: %s)", err, out)
+	}
+	if edited.Title != "Updated task title" || edited.Priority != model.PriorityCritical {
+		t.Errorf("expected edited task title and priority C, got %+v", edited)
+	}
+	if len(edited.Tags) != 2 || len(edited.Dependencies) != 2 {
+		t.Errorf("expected 2 tags and 2 dependencies, got tags=%v deps=%v", edited.Tags, edited.Dependencies)
+	}
+
+	// 9. Tag manipulation (+tag, -tag)
+	out, err = runCmd("tag", "1", "+backend", "-go")
+	if err != nil {
+		t.Fatalf("tm tag failed: %v, out: %s", err, out)
+	}
+	var tagged model.Task
+	if err := json.Unmarshal([]byte(out), &tagged); err != nil {
+		t.Fatalf("failed to parse JSON from tag output: %v (raw: %s)", err, out)
+	}
+	tagSet := make(map[string]bool)
+	for _, tg := range tagged.Tags {
+		tagSet[tg] = true
+	}
+	if !tagSet["backend"] || !tagSet["cli"] || tagSet["go"] {
+		t.Errorf("expected tags [backend, cli] without 'go', got: %v", tagged.Tags)
+	}
+
+	// 10. Dependency manipulation (+dep, -dep)
+	out, err = runCmd("dep", "1", "+4", "-2")
+	if err != nil {
+		t.Fatalf("tm dep failed: %v, out: %s", err, out)
+	}
+	var depTask model.Task
+	if err := json.Unmarshal([]byte(out), &depTask); err != nil {
+		t.Fatalf("failed to parse JSON from dep output: %v (raw: %s)", err, out)
+	}
+	depSet := make(map[int64]bool)
+	for _, d := range depTask.Dependencies {
+		depSet[d] = true
+	}
+	if !depSet[4] || !depSet[3] || depSet[2] {
+		t.Errorf("expected dependencies [3, 4] without 2, got: %v", depTask.Dependencies)
+	}
+
+	// 11. Show Task Details
+	out, err = runCmd("show", "1")
+	if err != nil {
+		t.Fatalf("tm show failed: %v, out: %s", err, out)
+	}
+	var richTask struct {
+		model.Task
+		Observations []*model.Observation `json:"observations"`
+	}
+	if err := json.Unmarshal([]byte(out), &richTask); err != nil {
+		t.Fatalf("failed to parse JSON from show output: %v (raw: %s)", err, out)
+	}
+	if richTask.ID != 1 || len(richTask.Observations) == 0 {
+		t.Errorf("expected task #1 with observations, got %+v", richTask)
 	}
 }

@@ -221,6 +221,31 @@ func scanObservationRow(rows *sql.Rows) (*model.Observation, error) {
 	return &obs, nil
 }
 
+func (s *Store) GetObservationCounts(ctx context.Context) (map[int64]int, error) {
+	query := `
+		SELECT task_id, COUNT(*)
+		FROM observations
+		WHERE task_id IS NOT NULL
+		GROUP BY task_id
+	`
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query observation counts: %w", err)
+	}
+	defer rows.Close()
+
+	counts := make(map[int64]int)
+	for rows.Next() {
+		var taskID int64
+		var count int
+		if err := rows.Scan(&taskID, &count); err != nil {
+			return nil, fmt.Errorf("failed to scan observation count: %w", err)
+		}
+		counts[taskID] = count
+	}
+	return counts, rows.Err()
+}
+
 func escapeFTS5Query(q string) string {
 	q = strings.ReplaceAll(q, `"`, `""`)
 	words := strings.Fields(q)

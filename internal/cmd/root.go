@@ -106,46 +106,58 @@ func PreprocessArgs(args []string) []string {
 		return args
 	}
 
-	var flags []string
-	var positionals []string
+	var leadingFlags []string
+	idx := 0
 
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
+	// Consume flags before any positional argument
+	for idx < len(args) {
+		arg := args[idx]
 		if strings.HasPrefix(arg, "-") {
-			flags = append(flags, arg)
-			if (arg == "--db" || arg == "-P" || arg == "--project" || arg == "--agent") && i+1 < len(args) {
-				i++
-				flags = append(flags, args[i])
+			leadingFlags = append(leadingFlags, arg)
+			if (arg == "--db" || arg == "-P" || arg == "--project" || arg == "--agent") && idx+1 < len(args) {
+				idx++
+				leadingFlags = append(leadingFlags, args[idx])
 			}
+			idx++
 		} else {
-			positionals = append(positionals, arg)
+			break
 		}
 	}
 
-	if len(positionals) == 0 {
+	if idx >= len(args) {
 		return args
 	}
 
-	first := positionals[0]
-	if _, err := strconv.ParseInt(first, 10, 64); err == nil {
-		if len(positionals) == 1 {
-			return append(flags, "show", first)
+	firstPos := args[idx]
+	if _, err := strconv.ParseInt(firstPos, 10, 64); err == nil {
+		// Exactly one positional: tm 1 -> tm show 1
+		if idx+1 == len(args) {
+			return append(leadingFlags, "show", firstPos)
 		}
 
-		action := positionals[1]
+		action := args[idx+1]
 		knownActions := map[string]bool{
-			"start": true,
-			"done":  true,
-			"block": true,
-			"log":   true,
-			"show":  true,
-			"del":   true,
+			"start":  true,
+			"done":   true,
+			"block":  true,
+			"log":    true,
+			"show":   true,
+			"edit":   true,
+			"tag":    true,
+			"tags":   true,
+			"dep":    true,
+			"deps":   true,
+			"depend": true,
+			"del":    true,
+			"delete": true,
+			"rm":     true,
 		}
+
 		if knownActions[action] {
-			result := append([]string{}, flags...)
-			result = append(result, action, first)
-			if len(positionals) > 2 {
-				result = append(result, positionals[2:]...)
+			result := append([]string{}, leadingFlags...)
+			result = append(result, action, firstPos)
+			if idx+2 < len(args) {
+				result = append(result, args[idx+2:]...)
 			}
 			return result
 		}

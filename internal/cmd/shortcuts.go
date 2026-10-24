@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"taskmanager/internal/model"
+	"taskmanager/internal/store"
 )
 
 var startCmd = &cobra.Command{
@@ -188,7 +189,10 @@ var showCmd = &cobra.Command{
 			return fmt.Errorf("failed to get task #%d: %w", id, err)
 		}
 
-		return formatter.PrintTask(task)
+		allTasks, _ := appStore.ListTasks(ctx, store.TaskFilter{IncludeDeleted: false})
+		obs, _ := appStore.ListObservations(ctx, store.ObservationFilter{TaskID: &task.ID})
+
+		return formatter.PrintTaskDetails(task, allTasks, obs)
 	},
 }
 

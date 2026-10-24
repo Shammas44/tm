@@ -125,30 +125,84 @@ func (f *Formatter) PrintTasks(tasks []*model.Task) error {
 }
 
 func (f *Formatter) PrintTask(t *model.Task) error {
+	return f.PrintTaskDetails(t, nil, nil)
+}
+
+func (f *Formatter) PrintTaskDetails(t *model.Task, allTasks []*model.Task, obs []*model.Observation) error {
 	if f.ShouldUseJSON() {
-		return f.PrintJSON(t)
+		type RichTask struct {
+			*model.Task
+			VirtualTags  []string             `json:"virtual_tags,omitempty"`
+			Observations []*model.Observation `json:"observations,omitempty"`
+		}
+		var vtags []string
+		if allTasks != nil {
+			vtags = model.ComputeVirtualTags(t, allTasks, len(obs) > 0)
+		}
+		return f.PrintJSON(RichTask{
+			Task:         t,
+			VirtualTags:  vtags,
+			Observations: obs,
+		})
 	}
 
 	fmt.Fprintf(f.Writer, "Task #%d: %s\n", t.ID, headerStyle.Render(t.Title))
-	fmt.Fprintf(f.Writer, "  Status:      %s\n", formatStatus(t.Status))
-	fmt.Fprintf(f.Writer, "  Priority:    %s\n", formatPriority(t.Priority))
-	if t.Project != "" {
-		fmt.Fprintf(f.Writer, "  Project:     %s\n", t.Project)
-	}
+	fmt.Fprintf(f.Writer, "  Status:       %s", formatStatus(t.Status))
 	if t.Active {
-		fmt.Fprintf(f.Writer, "  Active:      %s\n", inProgressStyle.Render("yes"))
+		fmt.Fprintf(f.Writer, " %s", inProgressStyle.Render("(active)"))
 	}
-	if t.Description != "" {
-		fmt.Fprintf(f.Writer, "  Description: %s\n", t.Description)
+	fmt.Fprintln(f.Writer)
+
+	fmt.Fprintf(f.Writer, "  Priority:     %s\n", formatPriority(t.Priority))
+	if t.Project != "" {
+		fmt.Fprintf(f.Writer, "  Project:      %s\n", t.Project)
+	}
+	if len(t.Tags) > 0 {
+		fmt.Fprintf(f.Writer, "  Tags:         %s\n", strings.Join(t.Tags, ", "))
+	}
+	if allTasks != nil {
+		vtags := model.ComputeVirtualTags(t, allTasks, len(obs) > 0)
+		if len(vtags) > 0 {
+			fmt.Fprintf(f.Writer, "  Virtual Tags: %s\n", strings.Join(vtags, ", "))
+		}
+	}
+	if len(t.Dependencies) > 0 {
+		var depStrs []string
+		for _, depID := range t.Dependencies {
+			var depStatus model.TaskStatus = "unknown"
+			for _, other := range allTasks {
+				if other.ID == depID {
+					depStatus = other.Status
+					break
+				}
+			}
+			depStrs = append(depStrs, fmt.Sprintf("#%d (%s)", depID, depStatus))
+		}
+		fmt.Fprintf(f.Writer, "  Dependencies: %s\n", strings.Join(depStrs, ", "))
 	}
 	if t.BlockerReason != "" {
-		fmt.Fprintf(f.Writer, "  Block Reason:%s\n", blockedStyle.Render(" "+t.BlockerReason))
+		fmt.Fprintf(f.Writer, "  Block Reason: %s\n", blockedStyle.Render(t.BlockerReason))
 	}
-	fmt.Fprintf(f.Writer, "  Created:     %s (%s ago)\n", t.CreatedAt.Local().Format("2006-01-02 15:04:05"), formatAge(t.CreatedAt))
-	fmt.Fprintf(f.Writer, "  Updated:     %s (%s ago)\n", t.UpdatedAt.Local().Format("2006-01-02 15:04:05"), formatAge(t.UpdatedAt))
+	if t.Description != "" {
+		fmt.Fprintf(f.Writer, "  Description:  %s\n", t.Description)
+	}
+	fmt.Fprintf(f.Writer, "  Created:      %s (%s ago)\n", t.CreatedAt.Local().Format("2006-01-02 15:04:05"), formatAge(t.CreatedAt))
+	fmt.Fprintf(f.Writer, "  Updated:      %s (%s ago)\n", t.UpdatedAt.Local().Format("2006-01-02 15:04:05"), formatAge(t.UpdatedAt))
 	if t.CompletedAt != nil {
-		fmt.Fprintf(f.Writer, "  Completed:   %s\n", t.CompletedAt.Local().Format("2006-01-02 15:04:05"))
+		fmt.Fprintf(f.Writer, "  Completed:    %s\n", t.CompletedAt.Local().Format("2006-01-02 15:04:05"))
 	}
+
+	if len(obs) > 0 {
+		fmt.Fprintf(f.Writer, "\nObservations (%d recorded):\n", len(obs))
+		for _, o := range obs {
+			fmt.Fprintf(f.Writer, "  • [%s] (#%d) %s\n",
+				o.CreatedAt.Local().Format("2006-01-02 15:04:05"),
+				o.ID,
+				o.Content,
+			)
+		}
+	}
+
 	return nil
 }
 

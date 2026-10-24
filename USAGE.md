@@ -249,21 +249,28 @@ Lists tasks with optional status and priority filters.
 
 ---
 
-### Task State Mutations (`tm <id> <action>`)
+### Task State Mutations & CLI Operations (`tm <id> <action>` or `tm <action> <id>`)
 
-Fast positional commands for instant task state updates:
+Fast CLI commands providing full parity with TUI operations:
 
-* **Start task:** `tm <id> start`  
+* **Start task:** `tm <id> start` (or `tm start <id>`)  
   Sets status to `in_progress`, marks `active = 1`, and unsets active on all other tasks.
-* **Complete task:** `tm <id> done`  
+* **Complete task:** `tm <id> done` (or `tm done <id>`)  
   Sets status to `completed`, sets `completed_at`, unsets active, and records a completion observation.
-* **Block task:** `tm <id> block "<reason>"`  
+* **Block task:** `tm <id> block "<reason>"` (or `tm block <id> "<reason>"`)  
   Sets status to `blocked`, records blocker reason, and unsets active.
-* **Log note:** `tm <id> log "<note>"`  
+* **Log note:** `tm <id> log "<note>"` (or `tm log <id> "<note>"`)  
   Appends an observation to `<id>`, indexes it into FTS5, and updates the session checkpoint.
+* **Edit task:** `tm edit <id> [flags]` (or `tm <id> edit`)  
+  - Non-interactive flag-based editing: `--title "..."`, `--status <status>`, `--priority <prio>`, `--project <proj>`, `--desc "..."`, `--tags <t1,t2>`, `--depends <d1,d2>`, `--block-reason "..."`.
+  - Interactive editing: When run without modifier flags in a terminal, opens `$EDITOR` with the vit/Taskwarrior template to edit fields and modify/delete past observation notes.
+* **Tag manipulation:** `tm tag <id> [+tag|-tag...]` (or `tm <id> tag +tag -tag`)  
+  Add (`+tag`) or remove (`-tag`) tags on an existing task.
+* **Dependency management:** `tm dep <id> [+depID|-depID...]` (or `tm <id> dep 2`)  
+  Add (`+depID`) or remove (`-depID`) prerequisite task dependencies.
 * **Inspect task:** `tm <id>` or `tm show <id>`  
-  Shows complete task details, age, blocker reasons, and description.
-* **Cancel task:** `tm delete <id>` (aliases: `del`, `rm`)  
+  Shows complete task details: status, priority, project, user tags, synthetic virtual tags (`READY`, `BLOCKED`, etc.), prerequisite dependencies with their current statuses, blocker reason, description, and full observation history.
+* **Cancel task:** `tm delete <id>` (aliases: `del`, `rm`, `tm <id> del`)  
   Marks task status as `cancelled`.
 
 ---
@@ -293,38 +300,64 @@ Concludes the active session cleanly and declares next steps.
 ---
 
 ### `tm tui`
-Full-screen interactive terminal dashboard built with Bubbletea and Lipgloss with an experience inspired by Taskwarrior and `vit`.
+Full-screen interactive terminal dashboard built with Bubbletea and Lipgloss with an experience inspired by Taskwarrior, `vit`, and Vim.
 
 * **Launch:** `tm tui`
-* **Column Layout (Pixel-Perfect Visual Alignment & Collision Prevention):**
+* **Column Layout (Pixel-Perfect Visual Alignment & UX):**
   - `ID`: Task auto-increment identifier
   - `Status`: Current status (`pending`, `in_progress`, `blocked`, `completed`, `cancelled`) with active indicator (`in_prog*`)
   - `Pri`: Priority (`C`, `H`, `M`, `L`)
   - `Project`: Project slug
   - `Tags`: User-defined labels (truncated with `...` if exceeding column width)
   - `Deps`: Prerequisite task dependencies
+  - `Notes`: Number of technical observations/notes recorded for this task
   - `Created`: Human-readable timestamp formatted as `YYYY-MM-DD HH:MM` (e.g. `2026-10-24 14:15`)
   - `Title`: Task description/title (truncated with `...` if exceeding available terminal width)
 
-* **Clean Layout & Navigation:**
-  - Header displays the currently active category (`Category: <Name> (<count> tasks)`) to maximize viewing area.
-  - Bottom controls bar is kept minimal/hidden to avoid clutter; press `h` or `?` to open the **full-screen scrollable controls window** (with `j`/`k`, `Up`/`Down`, `PgUp`/`PgDown`, `g`/`G` navigation).
-  - `j` / `k` or `Down` / `Up`: Navigate task list (with automatic viewport scrolling)
-  - `g` / `Home`: Jump to top of task list
-  - `G` / `End`: Jump to bottom of task list
-  - `PgUp` / `PgDown`: Scroll page up / down
+* **Visual Grid Selection & Interactive Column Sorting:**
+  - **Crosshair Selection:** Navigate rows with `j`/`k` (or `Down`/`Up`) and select columns with `h`/`l` (or `Left`/`Right`). The currently selected cell and column header are distinctly highlighted.
+  - **Column Sorting (`s`):** Pressing `s` sorts by the currently selected column. Pressing `s` again toggles sort direction between ascending (`▲`) and descending (`▼`).
+  - **Continuous Backlog Browsing:** No artificial pagination; smoothly browse all tasks continuously with viewport scrolling.
+
+* **Vim-Style Navigation & Keyboard Actions:**
+  - `j` / `k` or `Down` / `Up`: Navigate rows down / up
+  - `h` / `l` or `Left` / `Right`: Select column left / right
+  - `gg`: Jump to top of task list (first task)
+  - `G` or `End`: Jump to bottom of task list (last task)
+  - `PgUp` / `PgDown`: Scroll task list by page
   - `Tab` / `Shift+Tab`: Cycle through categories (`All`, `Ready`, `Pending`, `In Progress`, `Blocked`, `Completed`)
   - `1` - `6`: Jump directly to category
   - `a` or `c`: **Create new task** using `$EDITOR`
-  - `e`: **Edit selected task** in `$EDITOR`
+  - `e`: **Edit selected task** in `$EDITOR` (or `:edit [id]`)
   - `Enter`: Start task (`in_progress` & `active`)
   - `x`: Mark task completed (`done`)
   - `b`: Prompt for blocker reason
   - `v`: Open observation / technical notes history modal
   - `/`: Enhanced search & filter (`+tag`, `+READY`, `+BLOCKED`, `project:x`, `pri:H`, text)
-  - `s`: Cycle column sorting (`ID ▲`, `Pri ▼`, `Created ▼`, `Status ▲`, `Project ▲`, `Title ▲`)
-  - `h` or `?`: **Open complete full-screen controls & shortcuts help window**
+  - `:`: **Enter Vim Command Mode** (`:add`, `:start`, `:done`, `:block`, `:log`, `:tag`, `:dep`, `:edit`, `:del`, `:q`)
+  - `?`: **Open complete full-screen controls & shortcuts help window**
   - `q` or `Ctrl+C`: Exit TUI
+
+* **Readonly Inspection Pane:**
+  - The bottom section of the screen provides a live readonly inspection pane for the currently selected task.
+  - As you move the cursor with `j`/`k`, `gg`, or `G`, the pane dynamically updates to show:
+    - Status, Priority, Project, Tags, and Dependencies
+    - Task Description
+    - Timestamped Observation Notes history
+
+* **Command Mode (`:`):**
+  - Pressing `:` activates the bottom command prompt:
+    - `:q` / `:quit` / `:exit`: Exit TUI
+    - `:add <title>`: Create a new task
+    - `:start [id]`: Start task (defaults to selected task)
+    - `:done [id]`: Mark task completed
+    - `:block [id] <reason>`: Block task with reason
+    - `:log [id] <note>`: Append observation note to task
+    - `:tag [id] +tag -tag`: Add or remove tags
+    - `:dep [id] +depID -depID`: Add or remove dependencies
+    - `:edit [id]`: Open task in `$EDITOR`
+    - `:del [id]`: Delete task
+    - `:help`: Open full help window
 
 #### Editor Integration (`$EDITOR` / `vit`-Style Editing):
 When pressing `a` (create) or `e` (edit), `tm tui` suspends the terminal and opens `$EDITOR` (or `$VISUAL`, defaulting to `vim` / `nano` / `vi`).

@@ -25,6 +25,28 @@ func TestSortTasks(t *testing.T) {
 	if tasks[0].ID != 1 || tasks[1].ID != 2 || tasks[2].ID != 3 {
 		t.Errorf("expected ID sorting 1, 2, 3; got %d, %d, %d", tasks[0].ID, tasks[1].ID, tasks[2].ID)
 	}
+
+	// Sort by observation count (Notes) descending
+	obsCounts := map[int64]int{
+		1: 5,
+		2: 0,
+		3: 12,
+	}
+	SortTasks(tasks, SortOrder{Field: SortByNotes, Ascending: false}, obsCounts)
+	if tasks[0].ID != 3 || tasks[1].ID != 1 || tasks[2].ID != 2 {
+		t.Errorf("expected notes sorting 3 (12), 1 (5), 2 (0); got %d, %d, %d", tasks[0].ID, tasks[1].ID, tasks[2].ID)
+	}
+
+	// Sort by observation count ascending
+	SortTasks(tasks, SortOrder{Field: SortByNotes, Ascending: true}, obsCounts)
+	if tasks[0].ID != 2 || tasks[1].ID != 1 || tasks[2].ID != 3 {
+		t.Errorf("expected notes sorting 2 (0), 1 (5), 3 (12); got %d, %d, %d", tasks[0].ID, tasks[1].ID, tasks[2].ID)
+	}
+
+	// Test Column Mapping
+	if ColumnToSortField(0) != SortByID || ColumnToSortField(6) != SortByNotes || ColumnToSortField(7) != SortByCreated {
+		t.Errorf("unexpected column mapping")
+	}
 }
 
 func TestFilterWithVirtualTags(t *testing.T) {

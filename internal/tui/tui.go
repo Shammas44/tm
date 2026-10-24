@@ -78,6 +78,22 @@ var (
 	colDepsWidth    = 6
 	colNotesWidth   = 5  // Observation count column
 	colCreatedWidth = 16 // Human-readable timestamp e.g. "2006-01-02 15:04"
+
+	// Session Table Column Widths
+	colSessIDWidth       = 10
+	colSessStatusWidth   = 13
+	colSessAgentWidth    = 18
+	colSessStartedWidth  = 16
+	colSessDurationWidth = 10
+	colSessTasksWidth    = 5
+	colSessNotesWidth    = 5
+)
+
+type ActiveTable int
+
+const (
+	TableTasks ActiveTable = iota
+	TableSessions
 )
 
 type ViewMode int
@@ -92,23 +108,39 @@ const (
 )
 
 type editorDoneMsg struct {
-	mode     string // "create" or "edit"
-	taskID   int64
-	tempPath string
-	err      error
+	mode      string // "create", "edit", or "session"
+	taskID    int64
+	sessionID string
+	tempPath  string
+	err       error
 }
 
 type Model struct {
-	store            *store.Store
-	tasks            []*model.Task
-	allTasks         []*model.Task
-	obsCounts        map[int64]int
-	activeTab        int // 0: All, 1: Ready, 2: Pending, 3: In Progress, 4: Blocked, 5: Completed
-	cursor           int // Selected row index
-	selectedCol      int // Selected column index (0 to TotalColumns-1)
-	scrollOffset     int // Top visible row index
+	store       *store.Store
+	activeTable ActiveTable
+
+	// Task table state
+	tasks        []*model.Task
+	allTasks     []*model.Task
+	obsCounts    map[int64]int
+	activeTab    int // 0: All, 1: Ready, 2: Pending, 3: In Progress, 4: Blocked, 5: Completed
+	cursor       int // Selected row index
+	selectedCol  int // Selected column index (0 to TotalColumns-1)
+	scrollOffset int // Top visible row index
+	sortOrder    SortOrder
+
+	// Session table state
+	sessions            []*model.Session
+	allSessions         []*model.Session
+	sessionObsCounts    map[string]int
+	sessionTaskCounts   map[string]int
+	sessionActiveTab    int // 0: All, 1: Active, 2: Completed, 3: Interrupted
+	sessionCursor       int // Selected row index in session table
+	sessionSelectedCol  int // Selected column index (0 to TotalSessionColumns-1)
+	sessionScrollOffset int // Top visible row index in session table
+	sessionSortOrder    SessionSortOrder
+
 	helpScrollOffset int
-	sortOrder        SortOrder
 	viewMode         ViewMode
 	searchQuery      string
 	commandInput     string // For Vim command mode ':'
@@ -123,18 +155,24 @@ type Model struct {
 }
 
 var tabs = []string{"All", "Ready", "Pending", "In Progress", "Blocked", "Completed"}
+var sessionTabs = []string{"All", "Active", "Completed", "Interrupted"}
 
 func New(st *store.Store) Model {
 	m := Model{
-		store:       st,
-		activeTab:   0,
-		viewMode:    ModeList,
-		selectedCol: 0,
-		sortOrder:   SortOrder{Field: SortByID, Ascending: true},
-		width:       80,
-		height:      24,
+		store:              st,
+		activeTable:        TableTasks,
+		activeTab:          0,
+		sessionActiveTab:   0,
+		viewMode:           ModeList,
+		selectedCol:        0,
+		sessionSelectedCol: 0,
+		sortOrder:          SortOrder{Field: SortByID, Ascending: true},
+		sessionSortOrder:   SessionSortOrder{Field: SessionSortByStarted, Ascending: false},
+		width:              80,
+		height:             24,
 	}
 	m.reloadTasks()
+	m.reloadSessions()
 	return m
 }
 
@@ -217,6 +255,109 @@ func (m *Model) adjustScroll() {
 	}
 }
 
+func (m *Model) reloadSessions() {
+	ctx := context.Background()
+	sessions, err := m.store.ListSessions(ctx, 200)
+	if err != nil {
+		m.statusMsg = fmt.Sprintf("Error loading sessions: %v", err)
+		return
+	}
+	m.allSessions = sessions
+
+	obsCounts := make(map[string]int)
+	taskCounts := make(map[string]int)
+	for _, sess := range sessions {
+		obsList, err := m.store.ListObservations(ctx, store.ObservationFilter{SessionID: sess.ID})
+		if err == nil {
+			obsCounts[sess.ID] = len(obsList)
+			touched := make(map[int64]bool)
+			if sess.ActiveTaskID != nil {
+				touched[*sess.ActiveTaskID] = true
+			}
+			for _, o := range obsList {
+				if o.TaskID != nil {
+					touched[*o.TaskID] = true
+				}
+			}
+			taskCounts[sess.ID] = len(touched)
+		}
+	}
+	m.sessionObsCounts = obsCounts
+	m.sessionTaskCounts = taskCounts
+
+	m.filterSessions()
+}
+
+func (m *Model) filterSessions() {
+	var filtered []*model.Session
+
+	for _, s := range m.allSessions {
+		switch m.sessionActiveTab {
+		case 1: // Active
+			if s.Status != model.SessionStatusActive {
+				continue
+			}
+		case 2: // Completed
+			if s.Status != model.SessionStatusCompleted {
+				continue
+			}
+		case 3: // Interrupted
+			if s.Status != model.SessionStatusInterrupted {
+				continue
+			}
+		}
+
+		if MatchesSessionFilter(s, m.searchQuery) {
+			filtered = append(filtered, s)
+		}
+	}
+
+	SortSessions(filtered, m.sessionSortOrder, m.sessionObsCounts, m.sessionTaskCounts)
+	m.sessions = filtered
+
+	if m.sessionCursor >= len(m.sessions) {
+		m.sessionCursor = max(0, len(m.sessions)-1)
+	}
+	m.adjustSessionScroll()
+}
+
+func (m *Model) adjustSessionScroll() {
+	visibleRows := m.availableRows()
+	if visibleRows <= 0 {
+		return
+	}
+	if m.sessionCursor < m.sessionScrollOffset {
+		m.sessionScrollOffset = m.sessionCursor
+	}
+	if m.sessionCursor >= m.sessionScrollOffset+visibleRows {
+		m.sessionScrollOffset = m.sessionCursor - visibleRows + 1
+	}
+	if m.sessionScrollOffset < 0 {
+		m.sessionScrollOffset = 0
+	}
+}
+
+func (m Model) countForSessionTab(tabIdx int) int {
+	cnt := 0
+	for _, s := range m.allSessions {
+		match := false
+		switch tabIdx {
+		case 0:
+			match = true
+		case 1:
+			match = (s.Status == model.SessionStatusActive)
+		case 2:
+			match = (s.Status == model.SessionStatusCompleted)
+		case 3:
+			match = (s.Status == model.SessionStatusInterrupted)
+		}
+		if match && MatchesSessionFilter(s, m.searchQuery) {
+			cnt++
+		}
+	}
+	return cnt
+}
+
 func (m Model) topSectionOverhead() int {
 	overhead := 4 // Title banner (2) + Table header & sep (2)
 	if m.searchQuery != "" || m.viewMode == ModeSearch {
@@ -247,16 +388,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.adjustScroll()
+		m.adjustSessionScroll()
 		return m, nil
 
 	case editorDoneMsg:
-		contentBytes, readErr := os.ReadFile(msg.tempPath)
-		_ = os.Remove(msg.tempPath)
-
 		if msg.err != nil {
+			_ = os.Remove(msg.tempPath)
 			m.statusMsg = fmt.Sprintf("Editor exited with error: %v", msg.err)
 			return m, nil
 		}
+
+		if msg.mode == "session" {
+			_ = os.Remove(msg.tempPath)
+			shortID := msg.sessionID
+			if len(shortID) > 8 {
+				shortID = shortID[:8]
+			}
+			m.statusMsg = fmt.Sprintf("Closed inspection for session %s", shortID)
+			return m, nil
+		}
+
+		contentBytes, readErr := os.ReadFile(msg.tempPath)
+		_ = os.Remove(msg.tempPath)
+
 		if readErr != nil {
 			m.statusMsg = fmt.Sprintf("Failed to read editor output: %v", readErr)
 			return m, nil
@@ -431,6 +585,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.searchQuery = ""
 				m.viewMode = ModeList
 				m.filterTasks()
+				m.filterSessions()
 				return m, nil
 			case "enter":
 				m.viewMode = ModeList
@@ -439,12 +594,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if len(m.searchQuery) > 0 {
 					m.searchQuery = m.searchQuery[:len(m.searchQuery)-1]
 					m.filterTasks()
+					m.filterSessions()
 				}
 				return m, nil
 			default:
 				if len(msg.String()) == 1 {
 					m.searchQuery += msg.String()
 					m.filterTasks()
+					m.filterSessions()
 				}
 				return m, nil
 			}
@@ -536,10 +693,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.String() == "g" {
 			now := time.Now()
 			if m.lastKey == 'g' && now.Sub(m.lastKeyPressTime) < 800*time.Millisecond {
-				m.cursor = 0
-				m.scrollOffset = 0
-				m.lastKey = 0
-				m.adjustScroll()
+				if m.activeTable == TableSessions {
+					m.sessionCursor = 0
+					m.sessionScrollOffset = 0
+					m.lastKey = 0
+					m.adjustSessionScroll()
+				} else {
+					m.cursor = 0
+					m.scrollOffset = 0
+					m.lastKey = 0
+					m.adjustScroll()
+				}
 				return m, nil
 			}
 			m.lastKey = 'g'
@@ -564,105 +728,230 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.commandInput = ""
 			return m, nil
 
+		// Switch tables (Tasks <-> Sessions)
+		case "t", "S":
+			if m.activeTable == TableTasks {
+				m.activeTable = TableSessions
+				m.statusMsg = "Switched to Sessions view (press 't' to return to tasks)"
+			} else {
+				m.activeTable = TableTasks
+				m.statusMsg = "Switched to Tasks view (press 't' to switch to sessions)"
+			}
+
 		// Requirement 1: Vertical line navigation
 		case "up", "k":
-			if m.cursor > 0 {
-				m.cursor--
-				m.adjustScroll()
+			if m.activeTable == TableSessions {
+				if m.sessionCursor > 0 {
+					m.sessionCursor--
+					m.adjustSessionScroll()
+				}
+			} else {
+				if m.cursor > 0 {
+					m.cursor--
+					m.adjustScroll()
+				}
 			}
 
 		case "down", "j":
-			if m.cursor < len(m.tasks)-1 {
-				m.cursor++
-				m.adjustScroll()
+			if m.activeTable == TableSessions {
+				if m.sessionCursor < len(m.sessions)-1 {
+					m.sessionCursor++
+					m.adjustSessionScroll()
+				}
+			} else {
+				if m.cursor < len(m.tasks)-1 {
+					m.cursor++
+					m.adjustScroll()
+				}
 			}
 
 		// Half-page scroll
 		case "ctrl+d", "J":
-			if len(m.tasks) > 0 {
-				step := max(1, m.availableRows()/2)
-				m.cursor = min(len(m.tasks)-1, m.cursor+step)
-				m.adjustScroll()
+			if m.activeTable == TableSessions {
+				if len(m.sessions) > 0 {
+					step := max(1, m.availableRows()/2)
+					m.sessionCursor = min(len(m.sessions)-1, m.sessionCursor+step)
+					m.adjustSessionScroll()
+				}
+			} else {
+				if len(m.tasks) > 0 {
+					step := max(1, m.availableRows()/2)
+					m.cursor = min(len(m.tasks)-1, m.cursor+step)
+					m.adjustScroll()
+				}
 			}
 
 		case "ctrl+u", "K":
-			step := max(1, m.availableRows()/2)
-			m.cursor = max(0, m.cursor-step)
-			m.adjustScroll()
+			if m.activeTable == TableSessions {
+				step := max(1, m.availableRows()/2)
+				m.sessionCursor = max(0, m.sessionCursor-step)
+				m.adjustSessionScroll()
+			} else {
+				step := max(1, m.availableRows()/2)
+				m.cursor = max(0, m.cursor-step)
+				m.adjustScroll()
+			}
 
 		// Requirement 1: Horizontal column navigation
 		case "left", "h":
-			if m.selectedCol > 0 {
-				m.selectedCol--
+			if m.activeTable == TableSessions {
+				if m.sessionSelectedCol > 0 {
+					m.sessionSelectedCol--
+				}
+			} else {
+				if m.selectedCol > 0 {
+					m.selectedCol--
+				}
 			}
 
 		case "right", "l":
-			if m.selectedCol < TotalColumns-1 {
-				m.selectedCol++
+			if m.activeTable == TableSessions {
+				if m.sessionSelectedCol < TotalSessionColumns-1 {
+					m.sessionSelectedCol++
+				}
+			} else {
+				if m.selectedCol < TotalColumns-1 {
+					m.selectedCol++
+				}
 			}
 
 		case "home":
-			m.cursor = 0
-			m.scrollOffset = 0
+			if m.activeTable == TableSessions {
+				m.sessionCursor = 0
+				m.sessionScrollOffset = 0
+			} else {
+				m.cursor = 0
+				m.scrollOffset = 0
+			}
 
 		case "G", "end":
-			if len(m.tasks) > 0 {
-				m.cursor = len(m.tasks) - 1
-				m.adjustScroll()
+			if m.activeTable == TableSessions {
+				if len(m.sessions) > 0 {
+					m.sessionCursor = len(m.sessions) - 1
+					m.adjustSessionScroll()
+				}
+			} else {
+				if len(m.tasks) > 0 {
+					m.cursor = len(m.tasks) - 1
+					m.adjustScroll()
+				}
 			}
 
 		case "pgup":
-			m.cursor = max(0, m.cursor-m.availableRows())
-			m.adjustScroll()
-
-		case "pgdown":
-			if len(m.tasks) > 0 {
-				m.cursor = min(len(m.tasks)-1, m.cursor+m.availableRows())
+			if m.activeTable == TableSessions {
+				m.sessionCursor = max(0, m.sessionCursor-m.availableRows())
+				m.adjustSessionScroll()
+			} else {
+				m.cursor = max(0, m.cursor-m.availableRows())
 				m.adjustScroll()
 			}
 
+		case "pgdown":
+			if m.activeTable == TableSessions {
+				if len(m.sessions) > 0 {
+					m.sessionCursor = min(len(m.sessions)-1, m.sessionCursor+m.availableRows())
+					m.adjustSessionScroll()
+				}
+			} else {
+				if len(m.tasks) > 0 {
+					m.cursor = min(len(m.tasks)-1, m.cursor+m.availableRows())
+					m.adjustScroll()
+				}
+			}
+
 		case "tab":
-			m.activeTab = (m.activeTab + 1) % len(tabs)
-			m.cursor = 0
-			m.scrollOffset = 0
-			m.filterTasks()
-
-		case "shift+tab":
-			m.activeTab = (m.activeTab - 1 + len(tabs)) % len(tabs)
-			m.cursor = 0
-			m.scrollOffset = 0
-			m.filterTasks()
-
-		case "1", "2", "3", "4", "5", "6":
-			tabIdx := int(msg.String()[0] - '1')
-			if tabIdx < len(tabs) {
-				m.activeTab = tabIdx
+			if m.activeTable == TableSessions {
+				m.sessionActiveTab = (m.sessionActiveTab + 1) % len(sessionTabs)
+				m.sessionCursor = 0
+				m.sessionScrollOffset = 0
+				m.filterSessions()
+			} else {
+				m.activeTab = (m.activeTab + 1) % len(tabs)
 				m.cursor = 0
 				m.scrollOffset = 0
 				m.filterTasks()
 			}
 
-		// Requirement 1: Sort by selected column, toggle direction if pressed again
-		case "s":
-			targetField := ColumnToSortField(m.selectedCol)
-			if m.sortOrder.Field == targetField {
-				m.sortOrder.Ascending = !m.sortOrder.Ascending
+		case "shift+tab":
+			if m.activeTable == TableSessions {
+				m.sessionActiveTab = (m.sessionActiveTab - 1 + len(sessionTabs)) % len(sessionTabs)
+				m.sessionCursor = 0
+				m.sessionScrollOffset = 0
+				m.filterSessions()
 			} else {
-				m.sortOrder.Field = targetField
-				m.sortOrder.Ascending = DefaultAscendingForField(targetField)
+				m.activeTab = (m.activeTab - 1 + len(tabs)) % len(tabs)
+				m.cursor = 0
+				m.scrollOffset = 0
+				m.filterTasks()
 			}
-			SortTasks(m.tasks, m.sortOrder, m.obsCounts)
-			m.statusMsg = fmt.Sprintf("Sorted by %s", m.sortOrder.Label())
+
+		case "1", "2", "3", "4", "5", "6":
+			tabIdx := int(msg.String()[0] - '1')
+			if m.activeTable == TableSessions {
+				if tabIdx < len(sessionTabs) {
+					m.sessionActiveTab = tabIdx
+					m.sessionCursor = 0
+					m.sessionScrollOffset = 0
+					m.filterSessions()
+				}
+			} else {
+				if tabIdx < len(tabs) {
+					m.activeTab = tabIdx
+					m.cursor = 0
+					m.scrollOffset = 0
+					m.filterTasks()
+				}
+			}
+
+		// Sort by selected column, toggle direction if pressed again
+		case "s":
+			if m.activeTable == TableSessions {
+				targetField := ColumnToSessionSortField(m.sessionSelectedCol)
+				if m.sessionSortOrder.Field == targetField {
+					m.sessionSortOrder.Ascending = !m.sessionSortOrder.Ascending
+				} else {
+					m.sessionSortOrder.Field = targetField
+					m.sessionSortOrder.Ascending = DefaultSessionAscendingForField(targetField)
+				}
+				SortSessions(m.sessions, m.sessionSortOrder, m.sessionObsCounts, m.sessionTaskCounts)
+				m.statusMsg = fmt.Sprintf("Sorted by %s", m.sessionSortOrder.Label())
+			} else {
+				targetField := ColumnToSortField(m.selectedCol)
+				if m.sortOrder.Field == targetField {
+					m.sortOrder.Ascending = !m.sortOrder.Ascending
+				} else {
+					m.sortOrder.Field = targetField
+					m.sortOrder.Ascending = DefaultAscendingForField(targetField)
+				}
+				SortTasks(m.tasks, m.sortOrder, m.obsCounts)
+				m.statusMsg = fmt.Sprintf("Sorted by %s", m.sortOrder.Label())
+			}
 
 		case "a", "c": // Add / Create task using $EDITOR
+			if m.activeTable == TableSessions {
+				m.statusMsg = "Task creation is only available in Tasks view (press 't')"
+				return m, nil
+			}
 			return m.openCreateEditor()
 
-		case "e": // Edit selected task using $EDITOR
+		case "e", "v": // Edit task or inspect session using $EDITOR
+			if m.activeTable == TableSessions {
+				if len(m.sessions) > 0 && m.sessionCursor < len(m.sessions) {
+					return m.openSessionEditor(m.sessions[m.sessionCursor].ID)
+				}
+				return m, nil
+			}
 			if len(m.tasks) > 0 && m.cursor < len(m.tasks) {
 				return m.openEditEditor(m.tasks[m.cursor].ID)
 			}
 
-		case "enter": // Start task
+		case "enter": // Start task or inspect session
+			if m.activeTable == TableSessions {
+				if len(m.sessions) > 0 && m.sessionCursor < len(m.sessions) {
+					return m.openSessionEditor(m.sessions[m.sessionCursor].ID)
+				}
+				return m, nil
+			}
 			if len(m.tasks) > 0 && m.cursor < len(m.tasks) {
 				t := m.tasks[m.cursor]
 				if err := m.store.SetActiveTask(ctx, t.ID); err == nil {
@@ -672,6 +961,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "x": // Mark done
+			if m.activeTable == TableSessions {
+				m.statusMsg = "Marking done is only available in Tasks view"
+				return m, nil
+			}
 			if len(m.tasks) > 0 && m.cursor < len(m.tasks) {
 				t := m.tasks[m.cursor]
 				if err := m.store.UpdateTaskStatus(ctx, t.ID, model.StatusCompleted, ""); err == nil {
@@ -681,12 +974,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "b": // Block task
+			if m.activeTable == TableSessions {
+				m.statusMsg = "Blocking is only available in Tasks view"
+				return m, nil
+			}
 			if len(m.tasks) > 0 && m.cursor < len(m.tasks) {
 				m.blockInput = ""
 				m.viewMode = ModeBlockInput
 			}
 
 		case "d": // Delete task permanently with confirmation & dependency check
+			if m.activeTable == TableSessions {
+				m.statusMsg = "Deleting is only available in Tasks view"
+				return m, nil
+			}
 			if len(m.tasks) == 0 || m.cursor >= len(m.tasks) {
 				return m, nil
 			}
@@ -798,6 +1099,16 @@ func (m Model) executeCommand(cmdStr string) (Model, tea.Cmd) {
 	switch action {
 	case "q", "quit", "exit":
 		return m, tea.Quit
+
+	case "tasks", "task":
+		m.activeTable = TableTasks
+		m.statusMsg = "Switched to Tasks view"
+		return m, nil
+
+	case "sessions", "session":
+		m.activeTable = TableSessions
+		m.statusMsg = "Switched to Sessions view"
+		return m, nil
 
 	case "w":
 		m.statusMsg = "Saved checkpoint."
@@ -1013,7 +1324,34 @@ func (m Model) executeCommand(cmdStr string) (Model, tea.Cmd) {
 		m.reloadTasks()
 		return m, nil
 
+	case "view", "open":
+		if m.activeTable == TableSessions {
+			if len(m.sessions) > 0 && m.sessionCursor < len(m.sessions) {
+				return m.openSessionEditor(m.sessions[m.sessionCursor].ID)
+			}
+			m.statusMsg = "No session selected."
+			return m, nil
+		}
+		id := selectedID
+		if len(args) > 0 {
+			if parsedID, err := strconv.ParseInt(args[0], 10, 64); err == nil {
+				id = parsedID
+			}
+		}
+		if id == 0 {
+			m.statusMsg = "No task selected."
+			return m, nil
+		}
+		return m.openEditEditor(id)
+
 	case "edit":
+		if m.activeTable == TableSessions {
+			if len(m.sessions) > 0 && m.sessionCursor < len(m.sessions) {
+				return m.openSessionEditor(m.sessions[m.sessionCursor].ID)
+			}
+			m.statusMsg = "No session selected."
+			return m, nil
+		}
 		id := selectedID
 		if len(args) > 0 {
 			if parsedID, err := strconv.ParseInt(args[0], 10, 64); err == nil {
@@ -1092,23 +1430,50 @@ func (m Model) View() string {
 
 	var s strings.Builder
 
-	// 1. Header: Active category banner & continuous browsing range info
+	// 1. Header: Table indicator, Active category banner & continuous browsing range info
 	s.WriteString(titleStyle.Render("TaskManager"))
-	s.WriteString(" ")
+	s.WriteString(" • ")
 
-	currentTabName := tabs[m.activeTab]
-	currentTabCount := m.countForTab(m.activeTab)
-	selectedTabBanner := fmt.Sprintf("Category: %s (%d tasks)", currentTabName, currentTabCount)
-	s.WriteString(activeTabStyle.Render(selectedTabBanner))
+	if m.activeTable == TableTasks {
+		s.WriteString(activeTabStyle.Render("[Tasks]"))
+		s.WriteString(" ")
+		s.WriteString(helpStyle.Render("Sessions (t)"))
+	} else {
+		s.WriteString(helpStyle.Render("Tasks (t)"))
+		s.WriteString(" ")
+		s.WriteString(activeTabStyle.Render("[Sessions]"))
+	}
+	s.WriteString("  ")
+
+	if m.activeTable == TableTasks {
+		currentTabName := tabs[m.activeTab]
+		currentTabCount := m.countForTab(m.activeTab)
+		selectedTabBanner := fmt.Sprintf("Category: %s (%d tasks)", currentTabName, currentTabCount)
+		s.WriteString(activeTabStyle.Render(selectedTabBanner))
+	} else {
+		currentTabName := sessionTabs[m.sessionActiveTab]
+		currentTabCount := m.countForSessionTab(m.sessionActiveTab)
+		selectedTabBanner := fmt.Sprintf("Category: %s (%d sessions)", currentTabName, currentTabCount)
+		s.WriteString(activeTabStyle.Render(selectedTabBanner))
+	}
 	s.WriteString(" ")
 
 	// Range & help shortcut info
 	rangeInfo := ""
-	if len(m.tasks) > 0 {
-		visibleEnd := min(len(m.tasks), m.scrollOffset+m.availableRows())
-		rangeInfo = fmt.Sprintf("[%d-%d of %d]  ?: help", m.scrollOffset+1, visibleEnd, len(m.tasks))
+	if m.activeTable == TableTasks {
+		if len(m.tasks) > 0 {
+			visibleEnd := min(len(m.tasks), m.scrollOffset+m.availableRows())
+			rangeInfo = fmt.Sprintf("[%d-%d of %d]  ?: help", m.scrollOffset+1, visibleEnd, len(m.tasks))
+		} else {
+			rangeInfo = "[0 tasks]  ?: help"
+		}
 	} else {
-		rangeInfo = "[0 tasks]  ?: help"
+		if len(m.sessions) > 0 {
+			visibleEnd := min(len(m.sessions), m.sessionScrollOffset+m.availableRows())
+			rangeInfo = fmt.Sprintf("[%d-%d of %d]  ?: help", m.sessionScrollOffset+1, visibleEnd, len(m.sessions))
+		} else {
+			rangeInfo = "[0 sessions]  ?: help"
+		}
 	}
 	s.WriteString(helpStyle.Render(rangeInfo))
 	s.WriteString("\n\n")
@@ -1145,7 +1510,17 @@ func (m Model) View() string {
 		return s.String()
 	}
 
-	// 4. Guaranteed Non-Colliding Table Headers with Sort Direction & Selection Highlight
+	if m.activeTable == TableTasks {
+		m.renderTaskTable(&s)
+	} else {
+		m.renderSessionTable(&s)
+	}
+
+	return s.String()
+}
+
+func (m Model) renderTaskTable(s *strings.Builder) {
+	// Guaranteed Non-Colliding Table Headers with Sort Direction & Selection Highlight
 	fixedColumnsWidth := colMarkWidth + len(colGap) +
 		colIDWidth + len(colGap) +
 		colStatusWidth + len(colGap) +
@@ -1190,7 +1565,7 @@ func (m Model) View() string {
 	s.WriteString(headerRow + "\n")
 	s.WriteString(strings.Repeat("─", max(75, m.width-2)) + "\n")
 
-	// 5. Task Rows with Strict Truncation, Crosshair Cell Highlight, and Viewport Scrolling
+	// Task Rows with Strict Truncation, Crosshair Cell Highlight, and Viewport Scrolling
 	visibleRows := m.availableRows()
 	renderedRows := 0
 
@@ -1220,14 +1595,12 @@ func (m Model) View() string {
 			}
 			depsStr := truncate(strings.Join(depList, ","), colDepsWidth)
 
-			// Requirement 4: Observation count column
 			notesCount := 0
 			if m.obsCounts != nil {
 				notesCount = m.obsCounts[t.ID]
 			}
 			notesStr := strconv.Itoa(notesCount)
 
-			// Requirement 5: Human-readable timestamp
 			createdStr := t.CreatedAt.Local().Format("2006-01-02 15:04")
 			titleStr := truncate(t.Title, titleWidth)
 
@@ -1307,19 +1680,194 @@ func (m Model) View() string {
 		}
 	}
 
-	// Pad unused rows so task list fills available height
 	for r := renderedRows; r < visibleRows; r++ {
 		s.WriteString("\n")
 	}
 
-	// Command Mode Input or clean spacing line
 	if m.viewMode == ModeCommand {
 		s.WriteString(cmdPrompt.Render(":") + m.commandInput + "█\n")
+	} else if m.statusMsg != "" {
+		s.WriteString(helpStyle.Render(m.statusMsg) + "\n")
 	} else {
 		s.WriteString("\n")
 	}
+}
 
-	return s.String()
+func (m Model) renderSessionTable(s *strings.Builder) {
+	fixedColumnsWidth := colMarkWidth + len(colGap) +
+		colSessIDWidth + len(colGap) +
+		colSessStatusWidth + len(colGap) +
+		colSessAgentWidth + len(colGap) +
+		colSessStartedWidth + len(colGap) +
+		colSessDurationWidth + len(colGap) +
+		colSessTasksWidth + len(colGap) +
+		colSessNotesWidth + len(colGap)
+
+	handoffWidth := max(20, m.width-fixedColumnsWidth-2)
+
+	renderColHeader := func(colIdx int, baseTitle string, width int) string {
+		title := baseTitle
+		targetField := ColumnToSessionSortField(colIdx)
+		if m.sessionSortOrder.Field == targetField {
+			if m.sessionSortOrder.Ascending {
+				title += " ▲"
+			} else {
+				title += " ▼"
+			}
+		}
+		if colIdx == m.sessionSelectedCol {
+			return headerSelectedColStyle.Width(width).Render(truncate(title, width))
+		}
+		return headerCellStyle.Width(width).Render(truncate(title, width))
+	}
+
+	headerRow := strings.Join([]string{
+		lipgloss.NewStyle().Width(colMarkWidth).Render(" "),
+		renderColHeader(0, "Session", colSessIDWidth),
+		renderColHeader(1, "Status", colSessStatusWidth),
+		renderColHeader(2, "Agent", colSessAgentWidth),
+		renderColHeader(3, "Started", colSessStartedWidth),
+		renderColHeader(4, "Duration", colSessDurationWidth),
+		renderColHeader(5, "Tasks", colSessTasksWidth),
+		renderColHeader(6, "Notes", colSessNotesWidth),
+		renderColHeader(7, "Handoff / Checkpoint", handoffWidth),
+	}, colGap)
+
+	s.WriteString(headerRow + "\n")
+	s.WriteString(strings.Repeat("─", max(75, m.width-2)) + "\n")
+
+	visibleRows := m.availableRows()
+	renderedRows := 0
+
+	if len(m.sessions) == 0 {
+		s.WriteString("  No sessions found in this category.\n")
+		renderedRows = 1
+	} else {
+		endIdx := min(len(m.sessions), m.sessionScrollOffset+visibleRows)
+
+		for i := m.sessionScrollOffset; i < endIdx; i++ {
+			sess := m.sessions[i]
+			isRowSelected := i == m.sessionCursor
+
+			cursorMark := "  "
+			if isRowSelected {
+				cursorMark = "▸ "
+			}
+
+			shortID := sess.ID
+			if len(shortID) > 8 {
+				shortID = shortID[:8]
+			}
+			idStr := truncate(shortID, colSessIDWidth)
+			statusStr := formatSessionStatusText(sess.Status)
+			rawStatus := strings.ToUpper(string(sess.Status))
+			agentStr := truncate(sess.AgentID, colSessAgentWidth)
+			startedStr := sess.StartedAt.Local().Format("2006-01-02 15:04")
+			durStr := truncate(FormatSessionDuration(sess), colSessDurationWidth)
+			tasksCount := m.sessionTaskCounts[sess.ID]
+			tasksStr := strconv.Itoa(tasksCount)
+			notesCount := m.sessionObsCounts[sess.ID]
+			notesStr := strconv.Itoa(notesCount)
+
+			handoffText := cleanOneLineHandoff(extractHandoffString(sess))
+			handoffStr := truncate(handoffText, handoffWidth)
+
+			var cells []string
+			if isRowSelected {
+				cells = []string{
+					idStr,
+					rawStatus,
+					agentStr,
+					startedStr,
+					durStr,
+					tasksStr,
+					notesStr,
+					handoffStr,
+				}
+			} else {
+				cells = []string{
+					idStr,
+					statusStr,
+					agentStr,
+					startedStr,
+					durStr,
+					tasksStr,
+					notesStr,
+					handoffStr,
+				}
+			}
+			widths := []int{
+				colSessIDWidth,
+				colSessStatusWidth,
+				colSessAgentWidth,
+				colSessStartedWidth,
+				colSessDurationWidth,
+				colSessTasksWidth,
+				colSessNotesWidth,
+				handoffWidth,
+			}
+
+			var renderedCells []string
+			if isRowSelected {
+				renderedCells = append(renderedCells, selectedRowCellStyle.Width(colMarkWidth).Render(cursorMark))
+				for colIdx := 0; colIdx < TotalSessionColumns; colIdx++ {
+					cellVal := cells[colIdx]
+					w := widths[colIdx]
+					if colIdx == m.sessionSelectedCol {
+						renderedCells = append(renderedCells, selectedColCellStyle.Width(w).Render(cellVal))
+					} else {
+						renderedCells = append(renderedCells, selectedRowCellStyle.Width(w).Render(cellVal))
+					}
+				}
+				gap := selectedGapStyle.Render(colGap)
+				rowLine := strings.Join(renderedCells, gap)
+				s.WriteString(rowLine + "\n")
+			} else {
+				renderedCells = append(renderedCells, lipgloss.NewStyle().Width(colMarkWidth).Render(cursorMark))
+				for colIdx := 0; colIdx < TotalSessionColumns; colIdx++ {
+					cellVal := cells[colIdx]
+					w := widths[colIdx]
+					renderedCells = append(renderedCells, lipgloss.NewStyle().Width(w).Render(cellVal))
+				}
+				rowLine := strings.Join(renderedCells, colGap)
+				s.WriteString(rowLine + "\n")
+			}
+			renderedRows++
+		}
+	}
+
+	for r := renderedRows; r < visibleRows; r++ {
+		s.WriteString("\n")
+	}
+
+	if m.viewMode == ModeCommand {
+		s.WriteString(cmdPrompt.Render(":") + m.commandInput + "█\n")
+	} else if m.statusMsg != "" {
+		s.WriteString(helpStyle.Render(m.statusMsg) + "\n")
+	} else {
+		s.WriteString("\n")
+	}
+}
+
+func cleanOneLineHandoff(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\t", " ")
+	return strings.TrimSpace(s)
+}
+
+func formatSessionStatusText(status model.SessionStatus) string {
+	raw := strings.ToUpper(string(status))
+	switch status {
+	case model.SessionStatusActive:
+		return inProgressStyle.Render(raw)
+	case model.SessionStatusCompleted:
+		return completedStyle.Render(raw)
+	case model.SessionStatusInterrupted:
+		return blockedStyle.Render(raw)
+	default:
+		return raw
+	}
 }
 
 func (m Model) helpVisibleHeight() int {
@@ -1343,19 +1891,20 @@ func (m Model) helpContentLines() []string {
 	}
 
 	return []string{
-		hSec("NAVIGATION"),
-		hKey("  j / k, ↓ / ↑") + hDesc("Navigate rows (tasks)"),
+		hSec("VIEW & NAVIGATION"),
+		hKey("  t / S") + hDesc("Switch between Tasks and Sessions tables"),
+		hKey("  j / k, ↓ / ↑") + hDesc("Navigate rows (tasks / sessions)"),
 		hKey("  h / l, ← / →") + hDesc("Select column left / right"),
-		hKey("  gg / G") + hDesc("Jump to first (top) / last (bottom) task"),
+		hKey("  gg / G") + hDesc("Jump to first (top) / last (bottom)"),
 		hKey("  Ctrl+D / Ctrl+U") + hDesc("Scroll list half-page down / up"),
-		hKey("  PgUp / PgDown") + hDesc("Scroll task list by page"),
-		hKey("  Tab / Shift+Tab") + hDesc("Cycle category tabs"),
+		hKey("  PgUp / PgDown") + hDesc("Scroll list by page"),
+		hKey("  Tab / Shift+Tab") + hDesc("Cycle category filter tabs"),
 		hKey("  1 - 6") + hDesc("Jump directly to category tab"),
 		"",
 		hSec("COLUMN SORTING"),
 		hKey("  s") + hDesc("Sort by selected column (press again to reverse ▲/▼)"),
 		"",
-		hSec("TASK ACTIONS"),
+		hSec("TASK ACTIONS (Tasks View)"),
 		hKey("  Enter") + hDesc("Start task (mark in_progress & active)"),
 		hKey("  x") + hDesc("Complete task (mark done)"),
 		hKey("  b") + hDesc("Block task (prompts for blocker)"),
@@ -1363,7 +1912,11 @@ func (m Model) helpContentLines() []string {
 		hKey("  a, c") + hDesc("Create new task in $EDITOR"),
 		hKey("  e") + hDesc("Edit task in $EDITOR"),
 		"",
+		hSec("SESSION ACTIONS (Sessions View)"),
+		hKey("  Enter / e / v") + hDesc("Inspect full session YAML in $EDITOR (read-only)"),
+		"",
 		hSec("VIM COMMAND MODE (:)"),
+		hKey("  :tasks / :sessions") + hDesc("Switch active table"),
 		hKey("  :add <title>") + hDesc("Create new task"),
 		hKey("  :start [id]") + hDesc("Start task (defaults to selected)"),
 		hKey("  :done [id]") + hDesc("Complete task"),
@@ -1371,12 +1924,12 @@ func (m Model) helpContentLines() []string {
 		hKey("  :log [id] <note>") + hDesc("Append note/observation"),
 		hKey("  :tag [id] +/-tag") + hDesc("Add or remove tags"),
 		hKey("  :dep [id] +/-id") + hDesc("Add or remove dependencies"),
-		hKey("  :edit [id]") + hDesc("Edit task in $EDITOR"),
+		hKey("  :edit [id]") + hDesc("Edit task or session in $EDITOR"),
 		hKey("  :del [id]") + hDesc("Delete task"),
 		hKey("  :q, :wq, :exit") + hDesc("Quit TaskManager"),
 		"",
 		hSec("SEARCH & FILTER"),
-		hKey("  /") + hDesc("Search text, +tag, +READY, +BLOCKED, pri:H, project:x"),
+		hKey("  /") + hDesc("Search text, tags, status, handoff, checkpoint"),
 		hKey("  Esc") + hDesc("Clear search / close modal"),
 	}
 }

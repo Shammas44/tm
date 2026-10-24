@@ -66,3 +66,16 @@ This document tracks implementation progress across all engineering slices defin
 - [x] **Slice 4.2: Build Automation & Static Binary Release**
   - [x] Implement `Makefile` with targets: `make build`, `make build-linux`, `make test`, `make clean`.
   - [x] Produces static Linux binary `bin/tm-linux-amd64` (`CGO_ENABLED=0`) and host binary `bin/tm`.
+
+---
+
+## Phase 5: Advanced TUI Capabilities, Session Inspection & Structured Handoff
+- [x] **Slice 5.1: Unified Handoff & Session Inspection CLI**
+  - [x] Unified `handoff` field supporting both structured JSON payloads and plain-text strings.
+  - [x] Implement `tm session list` and `tm session show <id>` for auditing historical sessions, duration, checkpoints, and touched tasks.
+  - [x] Implement `tm status` for querying complete project state without initiating a working session.
+- [x] **Slice 5.2: Dual-Table TUI & Read-Only Session YAML Inspection**
+  - [x] Dual-table switcher between Tasks and Sessions tables (`t`, `S`, `:tasks`, `:sessions`).
+  - [x] Grid crosshair cell highlight, interactive column sorting (`s`), category tabs (`1`-`6`, `Tab`), and search filtering (`/`) on both tables.
+  - [x] Read-only session inspection launching `$EDITOR` with formatted YAML representation (`Enter`, `e`, `v`).
+  - [x] Full test suite for session sorting, filtering, and TUI table switching in `internal/tui/session_table_test.go`.

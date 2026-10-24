@@ -308,6 +308,28 @@ Performs BM25-ranked full-text search across all notes, discoveries, and observa
 
 ---
 
+### `tm status`
+Queries the current project state without initiating a new working session or mutating database state. Ideal for external status queries, read-only status bar integrations, and prompt synthesis.
+
+* **Usage:** `tm status [--json]`
+* **Examples:**
+  ```bash
+  tm status
+  tm status --json
+  ```
+* *Human output:*
+  ```text
+  === TaskManager Project Status ===
+  Active Session:  80ed5772-3a0c-42c4-8f73-668fe1486ab9 (agent: claude-opus, started: 25m ago)
+  Active Task:     #42 Implement session table in TUI [in_progress]
+  Backlog Status:  1 pending, 1 in progress, 0 blocked, 18 completed (20 total)
+  Last Checkpoint: Refactored database queries
+  Last Handoff:    Next step: add caching
+  ```
+* *Machine JSON:* Compact JSON containing `active_session`, `active_task`, `backlog_counts`, `last_checkpoint`, `last_handoff`, and `last_interrupted_session`.
+
+---
+
 ### `tm handoff` (Optional)
 Concludes the active session cleanly and declares next steps, supporting both **plain text** and **structured JSON**.
 
@@ -350,10 +372,15 @@ Inspect past sessions, audit interrupted runs, and review historical handoffs, o
 ---
 
 ### `tm tui`
-Full-screen interactive terminal dashboard built with Bubbletea and Lipgloss with an experience inspired by Taskwarrior, `vit`, and Vim.
+Full-screen interactive terminal dashboard built with Bubbletea and Lipgloss with an experience inspired by Taskwarrior, `vit`, and Vim. Supports dual-table inspection for both **Tasks** and **Sessions**.
 
 * **Launch:** `tm tui`
-* **Column Layout (Pixel-Perfect Visual Alignment & UX):**
+* **Dual-Table Architecture (Tasks & Sessions):**
+  - Switch seamlessly between the **Tasks** table and the **Sessions** table with `t` or `S` (or command mode `:tasks` / `:sessions`).
+  - Both tables maintain independent cursor positions, category filters, and scroll offsets for instant switching.
+  - Both tables offer an identical visual experience: visual crosshair grid selection (blue row and lighter blue cell highlight), column sorting (`s`), category tabs (`Tab`/`Shift+Tab`/`1`-`6`), search filtering (`/`), and full-screen continuous viewport scrolling.
+
+* **Task Table Columns:**
   - `ID`: Task auto-increment identifier
   - `Status`: Current status (`pending`, `in_progress`, `blocked`, `completed`, `cancelled`) with active indicator (`in_prog*`)
   - `Pri`: Priority (`C`, `H`, `M`, `L`)
@@ -364,31 +391,81 @@ Full-screen interactive terminal dashboard built with Bubbletea and Lipgloss wit
   - `Created`: Human-readable timestamp formatted as `YYYY-MM-DD HH:MM` (e.g. `2026-10-24 14:15`)
   - `Title`: Task description/title (truncated with `...` if exceeding available terminal width)
 
+* **Session Table Columns:**
+  - `Session`: Short 8-character session identifier
+  - `Status`: Session status (`ACTIVE`, `COMPLETED`, `INTERRUPTED`)
+  - `Agent`: Agent identifier (or `human`)
+  - `Started`: Session start timestamp (`YYYY-MM-DD HH:MM`)
+  - `Duration`: Formatted execution duration (e.g. `45m 12s`, `2h 10m`)
+  - `Tasks`: Total count of tasks touched / worked on during this session
+  - `Notes`: Total count of observations / findings logged during this session
+  - `Handoff / Checkpoint`: Single-line preview of handoff instructions or latest checkpoint
+
 * **Visual Grid Selection & Interactive Column Sorting:**
   - **Crosshair Selection:** Navigate rows with `j`/`k` (or `Down`/`Up`) and select columns with `h`/`l` (or `Left`/`Right`). The currently selected cell and column header are distinctly highlighted.
   - **Column Sorting (`s`):** Pressing `s` sorts by the currently selected column. Pressing `s` again toggles sort direction between ascending (`▲`) and descending (`▼`).
-  - **Continuous Backlog Browsing:** No artificial pagination; smoothly browse all tasks continuously with viewport scrolling.
+  - **Continuous Backlog Browsing:** No artificial pagination; smoothly browse all tasks or sessions continuously with viewport scrolling.
 
 * **Vim-Style Navigation & Keyboard Actions:**
+  - `t` or `S`: **Toggle between Tasks and Sessions tables**
   - `j` / `k` or `Down` / `Up`: Navigate rows down / up
   - `h` / `l` or `Left` / `Right`: Select column left / right
-  - `Ctrl+D` / `Ctrl+U` or `J` / `K`: Scroll task list half-page down / up
-  - `gg`: Jump to top of task list (first task)
-  - `G` or `End`: Jump to bottom of task list (last task)
-  - `PgUp` / `PgDown`: Scroll task list by page
-  - `Tab` / `Shift+Tab`: Cycle through categories (`All`, `Ready`, `Pending`, `In Progress`, `Blocked`, `Completed`)
-  - `1` - `6`: Jump directly to category
+  - `Ctrl+D` / `Ctrl+U` or `J` / `K`: Scroll list half-page down / up
+  - `gg`: Jump to top of table (first item)
+  - `G` or `End`: Jump to bottom of table (last item)
+  - `PgUp` / `PgDown`: Scroll table by page
+  - `Tab` / `Shift+Tab`: Cycle through category filter tabs (Tasks: `All`, `Ready`, `Pending`, `In Progress`, `Blocked`, `Completed`; Sessions: `All`, `Active`, `Completed`, `Interrupted`)
+  - `1` - `6`: Jump directly to category tab
   - `s`: Sort by selected column (press again to reverse direction)
-  - `a` or `c`: **Create new task** using `$EDITOR`
-  - `e`: **Edit selected task** in `$EDITOR` (or `:edit [id]`)
-  - `Enter`: Start task (`in_progress` & `active`)
-  - `x`: Mark task completed (`done`)
-  - `b`: Prompt for blocker (automatically sets status to `blocked`)
-  - `d`: **Delete task permanently** (prompts for confirmation; blocked if other tasks depend on it)
-  - `/`: Enhanced search & filter (`+tag`, `+READY`, `+BLOCKED`, `project:x`, `pri:H`, text)
-  - `:`: **Enter Vim Command Mode** (`:add`, `:start`, `:done`, `:block`, `:log`, `:tag`, `:dep`, `:edit`, `:del`, `:q`)
+  - `a` or `c`: **Create new task** using `$EDITOR` (Tasks view)
+  - `e`: **Edit task** in `$EDITOR` (Tasks view) or **Inspect session YAML** (Sessions view)
+  - `Enter`: **Start task** (Tasks view) or **Inspect session YAML** (Sessions view)
+  - `v`: **Inspect session YAML** in `$EDITOR` (Sessions view)
+  - `x`: Mark task completed (`done`, Tasks view)
+  - `b`: Prompt for blocker (automatically sets status to `blocked`, Tasks view)
+  - `d`: **Delete task permanently** (prompts for confirmation; blocked if other tasks depend on it, Tasks view)
+  - `/`: Enhanced search & filter across titles, tags, agents, handoffs, and checkpoints
+  - `:`: **Enter Vim Command Mode** (`:tasks`, `:sessions`, `:add`, `:start`, `:done`, `:block`, `:log`, `:tag`, `:dep`, `:edit`, `:del`, `:q`)
   - `?`: **Open complete full-screen controls & shortcuts help window**
   - `q` or `Ctrl+C`: Exit TUI
+
+* **Read-Only Session Inspection in `$EDITOR`:**
+  - Selecting any session row and pressing `Enter`, `e`, or `v` (or typing `:open` / `:edit`) generates a temporary `.yaml` file containing the full structured session state and opens `$EDITOR` in a strictly read-only inspection mode.
+  - The rendered YAML file contains the session UUID, agent, execution duration, active task, checkpoint, handoff (structured JSON or plain text), all tasks touched during the session, and all observations recorded with timestamps:
+  ```yaml
+  # ==============================================================================
+  # READ-ONLY SESSION INSPECTION: 80ed5772-3a0c-42c4-8f73-668fe1486ab9
+  # This file is strictly read-only. Close your editor (:q) to return.
+  # ==============================================================================
+
+  id: 80ed5772-3a0c-42c4-8f73-668fe1486ab9
+  status: completed
+  agent: claude-opus
+  started_at: 2026-10-24 10:15:00
+  ended_at: 2026-10-24 10:55:00
+  duration: 40m 0s
+  active_task:
+    id: 42
+    title: Implement session table in TUI
+    status: completed
+    priority: H
+    project: TM-Core
+  checkpoint: Final checkpoint before handoff
+  handoff:
+    summary: Added dual-table switcher and YAML session inspection in TUI
+    next_action: Run integration tests and release
+  tasks_touched:
+    - id: 42
+      title: Implement session table in TUI
+      status: completed
+      priority: H
+  observations:
+    - id: 1
+      task_id: 42
+      timestamp: 2026-10-24 10:20:00
+      content: Researched Bubbletea table layouts and unified scrolling viewport
+  ```
+  - Closing your editor (`:q`) returns instantly to the session table without mutating any database records.
 
 * **Full-Height Task Backlog Layout:**
   - The task list table utilizes the full terminal screen height, maximizing task density and backlog visibility.

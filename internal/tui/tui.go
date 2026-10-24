@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -33,8 +34,8 @@ var (
 
 	headerSelectedColStyle = lipgloss.NewStyle().
 				Bold(true).
-				Foreground(lipgloss.Color("15")).
-				Background(lipgloss.Color("240"))
+				Foreground(lipgloss.Color("255")).
+				Background(lipgloss.Color("62")) // Royal Indigo
 
 	selectedRowStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("255")).
@@ -42,8 +43,8 @@ var (
 
 	selectedCellStyle = lipgloss.NewStyle().
 				Bold(true).
-				Foreground(lipgloss.Color("0")).
-				Background(lipgloss.Color("14")) // Bright Cyan block for selected cell
+				Foreground(lipgloss.Color("255")).
+				Background(lipgloss.Color("62")) // Royal Indigo (replaces green/cyan)
 
 	inProgressStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Bold(true)
 	completedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
@@ -525,6 +526,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.lastKey == 'g' && now.Sub(m.lastKeyPressTime) < 800*time.Millisecond {
 				m.cursor = 0
 				m.scrollOffset = 0
+				m.previewScroll = 0
 				m.lastKey = 0
 				m.adjustScroll()
 				m.loadSelectedTaskObs()
@@ -556,6 +558,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "up", "k":
 			if m.cursor > 0 {
 				m.cursor--
+				m.previewScroll = 0
 				m.adjustScroll()
 				m.loadSelectedTaskObs()
 			}
@@ -563,8 +566,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "down", "j":
 			if m.cursor < len(m.tasks)-1 {
 				m.cursor++
+				m.previewScroll = 0
 				m.adjustScroll()
 				m.loadSelectedTaskObs()
+			}
+
+		// Scroll detail inspection pane up / down
+		case "J", "ctrl+d":
+			m.previewScroll += 2
+
+		case "K", "ctrl+u":
+			if m.previewScroll > 0 {
+				m.previewScroll -= 2
 			}
 
 		// Requirement 1: Horizontal column navigation
@@ -581,23 +594,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "home":
 			m.cursor = 0
 			m.scrollOffset = 0
+			m.previewScroll = 0
 			m.loadSelectedTaskObs()
 
 		case "G", "end":
 			if len(m.tasks) > 0 {
 				m.cursor = len(m.tasks) - 1
+				m.previewScroll = 0
 				m.adjustScroll()
 				m.loadSelectedTaskObs()
 			}
 
 		case "pgup":
 			m.cursor = max(0, m.cursor-m.availableRows())
+			m.previewScroll = 0
 			m.adjustScroll()
 			m.loadSelectedTaskObs()
 
 		case "pgdown":
 			if len(m.tasks) > 0 {
 				m.cursor = min(len(m.tasks)-1, m.cursor+m.availableRows())
+				m.previewScroll = 0
 				m.adjustScroll()
 				m.loadSelectedTaskObs()
 			}
@@ -606,6 +623,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.activeTab = (m.activeTab + 1) % len(tabs)
 			m.cursor = 0
 			m.scrollOffset = 0
+			m.previewScroll = 0
 			m.filterTasks()
 			m.loadSelectedTaskObs()
 
@@ -613,6 +631,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.activeTab = (m.activeTab - 1 + len(tabs)) % len(tabs)
 			m.cursor = 0
 			m.scrollOffset = 0
+			m.previewScroll = 0
 			m.filterTasks()
 			m.loadSelectedTaskObs()
 
@@ -622,6 +641,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.activeTab = tabIdx
 				m.cursor = 0
 				m.scrollOffset = 0
+				m.previewScroll = 0
 				m.filterTasks()
 				m.loadSelectedTaskObs()
 			}
@@ -1206,7 +1226,7 @@ func (m Model) View() string {
 	} else if m.statusMsg != "" {
 		s.WriteString(helpStyle.Render("Status: ") + m.statusMsg + "\n")
 	} else {
-		s.WriteString(helpStyle.Render("Normal Mode • h/l: col • j/k: row • s: sort • /: search • :: cmd • ?: help") + "\n")
+		s.WriteString(helpStyle.Render("Normal Mode • h/l: col • j/k: row • s: sort • J/K: details scroll • :: cmd • ?: help") + "\n")
 	}
 
 	return s.String()
@@ -1215,21 +1235,22 @@ func (m Model) View() string {
 // Requirement 7: Readonly pane inspecting description and observations of selected task
 func (m Model) renderDetailPane() string {
 	paneHeight := m.previewPaneHeight()
-	var sb strings.Builder
+	var allLines []string
 
 	if len(m.tasks) == 0 || m.cursor >= len(m.tasks) {
 		sep := strings.Repeat("─", max(40, m.width-2))
+		var sb strings.Builder
 		sb.WriteString(paneSubStyle.Render(sep) + "\n")
 		sb.WriteString(paneSubStyle.Render("  (No task selected)\n"))
+		for i := 2; i < paneHeight; i++ {
+			sb.WriteString("\n")
+		}
 		return sb.String()
 	}
 
 	t := m.tasks[m.cursor]
-	sepTitle := fmt.Sprintf("── Task #%d: %s ", t.ID, truncate(t.Title, 45))
-	remainingLen := max(0, m.width-len(sepTitle)-2)
-	sb.WriteString(paneBarHead.Render(sepTitle) + paneSubStyle.Render(strings.Repeat("─", remainingLen)) + "\n")
 
-	// Metadata line
+	// 1. Metadata line
 	var metaParts []string
 	metaParts = append(metaParts, fmt.Sprintf("Status: %s", t.Status))
 	metaParts = append(metaParts, fmt.Sprintf("Pri: %s", t.Priority))
@@ -1246,42 +1267,96 @@ func (m Model) renderDetailPane() string {
 		}
 		metaParts = append(metaParts, fmt.Sprintf("Deps: #%s", strings.Join(depStrs, ", #")))
 	}
-	sb.WriteString(paneSubStyle.Render("  " + strings.Join(metaParts, " • ")) + "\n")
+	allLines = append(allLines, paneSubStyle.Render("  "+strings.Join(metaParts, " • ")))
 
-	// Description or blocker
-	linesPrinted := 2
+	// 2. Blocker reason
 	if t.BlockerReason != "" {
-		sb.WriteString(blockedStyle.Render("  Blocker: " + t.BlockerReason) + "\n")
-		linesPrinted++
+		allLines = append(allLines, blockedStyle.Render("  ⚠ Blocker: "+t.BlockerReason))
 	}
 
+	// 3. Description (multi-line, nicely formatted)
 	desc := strings.TrimSpace(t.Description)
 	if desc != "" {
-		firstLine := strings.Split(desc, "\n")[0]
-		sb.WriteString(fmt.Sprintf("  Desc: %s\n", truncate(firstLine, max(20, m.width-12))))
-		linesPrinted++
+		allLines = append(allLines, paneBarHead.Render("  Description:"))
+		descWrapped := wrapText(desc, max(30, m.width-6), "    ")
+		for _, dl := range descWrapped {
+			allLines = append(allLines, dl)
+		}
 	}
 
-	// Observations history
+	// 4. Observations & Notes (multi-line, nicely formatted)
 	if len(m.selectedTaskObs) == 0 {
-		if linesPrinted < paneHeight {
-			sb.WriteString(paneSubStyle.Render("  Notes: (None recorded)\n"))
-			linesPrinted++
+		if desc == "" {
+			allLines = append(allLines, paneSubStyle.Render("  Notes: (None recorded)"))
 		}
 	} else {
+		allLines = append(allLines, paneBarHead.Render(fmt.Sprintf("  Observations (%d recorded):", len(m.selectedTaskObs))))
 		for _, o := range m.selectedTaskObs {
-			if linesPrinted >= paneHeight {
-				break
+			headerPrefix := fmt.Sprintf("  • [%s] (#%d) ", o.CreatedAt.Local().Format("15:04"), o.ID)
+			subIndent := "      "
+			contentLines := strings.Split(strings.TrimSpace(o.Content), "\n")
+			for lineIdx, rawLine := range contentLines {
+				rawLine = strings.TrimSpace(rawLine)
+				if rawLine == "" {
+					continue
+				}
+				if lineIdx == 0 {
+					firstWrapped := wrapText(rawLine, max(30, m.width-6-len(headerPrefix)), "")
+					if len(firstWrapped) > 0 {
+						allLines = append(allLines, paneSubStyle.Render(headerPrefix)+firstWrapped[0])
+						for _, fw := range firstWrapped[1:] {
+							allLines = append(allLines, subIndent+fw)
+						}
+					} else {
+						allLines = append(allLines, paneSubStyle.Render(headerPrefix))
+					}
+				} else {
+					subWrapped := wrapText(rawLine, max(30, m.width-6-len(subIndent)), subIndent)
+					for _, sw := range subWrapped {
+						allLines = append(allLines, sw)
+					}
+				}
 			}
-			noteLine := fmt.Sprintf("  • [%s] %s", o.CreatedAt.Format("15:04"), truncate(o.Content, max(20, m.width-18)))
-			sb.WriteString(paneSubStyle.Render(noteLine) + "\n")
-			linesPrinted++
 		}
 	}
 
-	for linesPrinted < paneHeight {
+	// Calculate scrolling
+	maxScroll := max(0, len(allLines)-paneHeight)
+	if m.previewScroll > maxScroll {
+		m.previewScroll = maxScroll
+	}
+	if m.previewScroll < 0 {
+		m.previewScroll = 0
+	}
+
+	// Pane title bar with scroll indicator if content overflows
+	scrollHint := ""
+	if len(allLines) > paneHeight {
+		scrollHint = fmt.Sprintf(" [%d-%d of %d • J/K to scroll] ",
+			m.previewScroll+1,
+			min(len(allLines), m.previewScroll+paneHeight),
+			len(allLines),
+		)
+	}
+
+	sepTitle := fmt.Sprintf("── Task #%d: %s%s", t.ID, truncate(t.Title, 40), scrollHint)
+	remainingLen := max(0, m.width-len(sepTitle)-2)
+	headerBar := paneBarHead.Render(sepTitle) + paneSubStyle.Render(strings.Repeat("─", remainingLen))
+
+	var sb strings.Builder
+	sb.WriteString(headerBar + "\n")
+
+	endIdx := min(len(allLines), m.previewScroll+paneHeight)
+	linesRendered := 0
+	if m.previewScroll < len(allLines) {
+		for i := m.previewScroll; i < endIdx; i++ {
+			sb.WriteString(allLines[i] + "\n")
+			linesRendered++
+		}
+	}
+	for linesRendered < paneHeight {
 		sb.WriteString("\n")
-		linesPrinted++
+		linesRendered++
 	}
 
 	return sb.String()
@@ -1298,6 +1373,8 @@ func (m Model) renderFullScreenHelp() string {
 		"  k, Up                Move row cursor up",
 		"  h, Left              Select column to the left",
 		"  l, Right             Select column to the right",
+		"  J, Ctrl+D            Scroll task details inspection pane down",
+		"  K, Ctrl+U            Scroll task details inspection pane up",
 		"  gg                   Jump to top of task list (first task)",
 		"  G, End               Jump to bottom of task list (last task)",
 		"  PgUp, PgDown         Scroll task list by page",
@@ -1431,6 +1508,50 @@ func (m Model) formatPriorityText(p model.TaskPriority) string {
 	default:
 		return str
 	}
+}
+
+func wrapText(text string, width int, indent string) []string {
+	if width <= 10 {
+		width = 40
+	}
+	var result []string
+	scanner := bufio.NewScanner(strings.NewReader(text))
+	for scanner.Scan() {
+		rawLine := scanner.Text()
+		if len(rawLine) == 0 {
+			result = append(result, indent)
+			continue
+		}
+		words := strings.Fields(rawLine)
+		if len(words) == 0 {
+			result = append(result, indent)
+			continue
+		}
+		var curLine strings.Builder
+		curLine.WriteString(indent)
+		curLen := len(indent)
+
+		for _, w := range words {
+			if curLen+len(w)+1 > width {
+				result = append(result, curLine.String())
+				curLine.Reset()
+				curLine.WriteString(indent)
+				curLine.WriteString(w)
+				curLen = len(indent) + len(w)
+			} else {
+				if curLen > len(indent) {
+					curLine.WriteString(" ")
+					curLen++
+				}
+				curLine.WriteString(w)
+				curLen += len(w)
+			}
+		}
+		if curLine.Len() > len(indent) {
+			result = append(result, curLine.String())
+		}
+	}
+	return result
 }
 
 func truncate(s string, maxLen int) string {

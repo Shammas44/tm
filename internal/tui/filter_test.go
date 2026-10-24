@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -85,5 +86,18 @@ func TestFilterWithVirtualTags(t *testing.T) {
 	critTag := ParseSearchQuery("+frontend")
 	if !MatchesFilter(t2, allTasks, false, critTag) {
 		t.Errorf("t2 has tag 'frontend', should match +frontend")
+	}
+}
+
+func TestWrapText(t *testing.T) {
+	multiLine := "Line 1 of description\nLine 2 is somewhat longer and needs wrapping at thirty chars\nLine 3"
+	wrapped := wrapText(multiLine, 30, "  ")
+	if len(wrapped) < 3 {
+		t.Errorf("expected at least 3 lines, got %d: %v", len(wrapped), wrapped)
+	}
+	for _, l := range wrapped {
+		if !strings.HasPrefix(l, "  ") {
+			t.Errorf("expected line to start with indent '  ', got '%s'", l)
+		}
 	}
 }

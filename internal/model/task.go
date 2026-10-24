@@ -30,6 +30,8 @@ type Task struct {
 	Project       string       `json:"project,omitempty"`
 	Active        bool         `json:"active"`
 	BlockerReason string       `json:"blocker_reason,omitempty"`
+	Tags          []string     `json:"tags,omitempty"`
+	Dependencies  []int64      `json:"dependencies,omitempty"`
 	CreatedAt     time.Time    `json:"created_at"`
 	UpdatedAt     time.Time    `json:"updated_at"`
 	CompletedAt   *time.Time   `json:"completed_at,omitempty"`

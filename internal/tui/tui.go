@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -29,6 +31,10 @@ var (
 			Background(lipgloss.Color("62")).
 			Padding(0, 1)
 
+	headerCellStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("12"))
+
 	selectedRowStyle = lipgloss.NewStyle().
 				Bold(true).
 				Foreground(lipgloss.Color("15")).
@@ -38,8 +44,29 @@ var (
 	completedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
 	blockedStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
 	pendingStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("14"))
+	cancelledStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+
+	criticalPrioStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
+	highPrioStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("208"))
+	mediumPrioStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("12"))
+	lowPrioStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 
 	helpStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+
+	modalBoxStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("62")).
+			Padding(1, 2)
+
+	// Column Widths for pixel-perfect alignment
+	colMarkWidth    = 2
+	colIDWidth      = 4
+	colStatusWidth  = 11
+	colPriWidth     = 3
+	colProjectWidth = 10
+	colTagsWidth    = 12
+	colDepsWidth    = 6
+	colCreatedWidth = 7
 )
 
 type ViewMode int
@@ -49,6 +76,7 @@ const (
 	ModeObservations
 	ModeSearch
 	ModeBlockInput
+	ModeHelp
 )
 
 type editorDoneMsg struct {
@@ -62,8 +90,10 @@ type Model struct {
 	store        *store.Store
 	tasks        []*model.Task
 	allTasks     []*model.Task
-	activeTab    int // 0: All, 1: Pending, 2: In Progress, 3: Blocked, 4: Completed
+	activeTab    int // 0: All, 1: Ready, 2: Pending, 3: In Progress, 4: Blocked, 5: Completed
 	cursor       int
+	scrollOffset int
+	sortOrder    SortOrder
 	viewMode     ViewMode
 	observations []*model.Observation
 	searchQuery  string
@@ -73,13 +103,16 @@ type Model struct {
 	height       int
 }
 
-var tabs = []string{"All", "Pending", "In Progress", "Blocked", "Completed"}
+var tabs = []string{"All", "Ready", "Pending", "In Progress", "Blocked", "Completed"}
 
 func New(st *store.Store) Model {
 	m := Model{
 		store:     st,
 		activeTab: 0,
 		viewMode:  ModeList,
+		sortOrder: SortOrder{Field: SortByID, Ascending: true},
+		width:     80,
+		height:    24,
 	}
 	m.reloadTasks()
 	return m
@@ -97,36 +130,76 @@ func (m *Model) reloadTasks() {
 }
 
 func (m *Model) filterTasks() {
+	criteria := ParseSearchQuery(m.searchQuery)
 	var filtered []*model.Task
+
 	for _, t := range m.allTasks {
-		if m.searchQuery != "" && !strings.Contains(strings.ToLower(t.Title), strings.ToLower(m.searchQuery)) {
-			continue
+		// Tab level filter
+		vtags := model.ComputeVirtualTags(t, m.allTasks, false)
+		vtagMap := make(map[string]bool)
+		for _, vt := range vtags {
+			vtagMap[vt] = true
 		}
+
 		switch m.activeTab {
-		case 1: // Pending
-			if t.Status == model.StatusPending {
-				filtered = append(filtered, t)
+		case 1: // Ready
+			if !vtagMap["READY"] {
+				continue
 			}
-		case 2: // In Progress
-			if t.Status == model.StatusInProgress {
-				filtered = append(filtered, t)
+		case 2: // Pending
+			if t.Status != model.StatusPending {
+				continue
 			}
-		case 3: // Blocked
-			if t.Status == model.StatusBlocked {
-				filtered = append(filtered, t)
+		case 3: // In Progress
+			if t.Status != model.StatusInProgress {
+				continue
 			}
-		case 4: // Completed
-			if t.Status == model.StatusCompleted {
-				filtered = append(filtered, t)
+		case 4: // Blocked
+			if !vtagMap["BLOCKED"] {
+				continue
 			}
-		default:
+		case 5: // Completed
+			if t.Status != model.StatusCompleted {
+				continue
+			}
+		}
+
+		if MatchesFilter(t, m.allTasks, false, criteria) {
 			filtered = append(filtered, t)
 		}
 	}
+
+	SortTasks(filtered, m.sortOrder)
 	m.tasks = filtered
+
 	if m.cursor >= len(m.tasks) {
 		m.cursor = max(0, len(m.tasks)-1)
 	}
+	m.adjustScroll()
+}
+
+func (m *Model) adjustScroll() {
+	visibleRows := m.availableRows()
+	if visibleRows <= 0 {
+		return
+	}
+	if m.cursor < m.scrollOffset {
+		m.scrollOffset = m.cursor
+	}
+	if m.cursor >= m.scrollOffset+visibleRows {
+		m.scrollOffset = m.cursor - visibleRows + 1
+	}
+	if m.scrollOffset < 0 {
+		m.scrollOffset = 0
+	}
+}
+
+func (m Model) availableRows() int {
+	rows := m.height - 8
+	if rows < 3 {
+		return 3
+	}
+	return rows
 }
 
 func (m Model) Init() tea.Cmd {
@@ -140,6 +213,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.adjustScroll()
 		return m, nil
 
 	case editorDoneMsg:
@@ -147,7 +221,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		_ = os.Remove(msg.tempPath)
 
 		if msg.err != nil {
-			m.statusMsg = fmt.Sprintf("Editor error: %v", msg.err)
+			m.statusMsg = fmt.Sprintf("Editor exited with error: %v", msg.err)
 			return m, nil
 		}
 		if readErr != nil {
@@ -162,8 +236,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if strings.TrimSpace(parsed.Title) == "" {
-			m.statusMsg = "Cancelled (empty task title)"
+			m.statusMsg = "Task creation/edit cancelled (empty title)"
 			return m, nil
+		}
+
+		// Get active session for checkpointing
+		activeSession, _ := m.store.GetActiveSession(ctx)
+		var sessionID *string
+		if activeSession != nil {
+			sessionID = &activeSession.ID
 		}
 
 		if msg.mode == "create" {
@@ -174,6 +255,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Project:       parsed.Project,
 				Description:   parsed.Description,
 				BlockerReason: parsed.BlockerReason,
+				Tags:          parsed.Tags,
+				Dependencies:  parsed.Dependencies,
 			}
 			created, err := m.store.CreateTask(ctx, newTask)
 			if err != nil {
@@ -183,6 +266,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if created.Status == model.StatusInProgress {
 				_ = m.store.SetActiveTask(ctx, created.ID)
 			}
+
+			// Record new note if provided
+			if strings.TrimSpace(parsed.NewNote) != "" {
+				_, _ = m.store.AddObservation(ctx, sessionID, &created.ID, parsed.NewNote)
+			}
+
+			if activeSession != nil {
+				_ = m.store.UpdateCheckpoint(ctx, activeSession.ID, &created.ID, fmt.Sprintf("Created task #%d: %s", created.ID, created.Title))
+			}
+
 			m.statusMsg = fmt.Sprintf("Created task #%d: %s", created.ID, created.Title)
 			m.reloadTasks()
 			return m, nil
@@ -200,6 +293,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			existing.Project = parsed.Project
 			existing.Description = parsed.Description
 			existing.BlockerReason = parsed.BlockerReason
+			existing.Tags = parsed.Tags
+			existing.Dependencies = parsed.Dependencies
 
 			if existing.Status == model.StatusInProgress {
 				_ = m.store.SetActiveTask(ctx, existing.ID)
@@ -210,12 +305,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 			}
+
+			// Record new note if provided
+			if strings.TrimSpace(parsed.NewNote) != "" {
+				_, _ = m.store.AddObservation(ctx, sessionID, &existing.ID, parsed.NewNote)
+			}
+
+			if activeSession != nil {
+				_ = m.store.UpdateCheckpoint(ctx, activeSession.ID, &existing.ID, fmt.Sprintf("Updated task #%d: %s", existing.ID, existing.Title))
+			}
+
 			m.statusMsg = fmt.Sprintf("Updated task #%d: %s", existing.ID, existing.Title)
 			m.reloadTasks()
 			return m, nil
 		}
 
 	case tea.KeyMsg:
+		if m.viewMode == ModeHelp {
+			switch msg.String() {
+			case "esc", "q", "h", "?", "enter":
+				m.viewMode = ModeList
+				return m, nil
+			}
+			return m, nil
+		}
+
 		if m.viewMode == ModeObservations {
 			switch msg.String() {
 			case "esc", "q", "v", "enter":
@@ -288,25 +402,67 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "q":
 			return m, tea.Quit
 
+		case "h", "?": // Help modal
+			m.viewMode = ModeHelp
+			return m, nil
+
 		case "up", "k":
 			if m.cursor > 0 {
 				m.cursor--
+				m.adjustScroll()
 			}
 
 		case "down", "j":
 			if m.cursor < len(m.tasks)-1 {
 				m.cursor++
+				m.adjustScroll()
+			}
+
+		case "g", "home": // Top
+			m.cursor = 0
+			m.scrollOffset = 0
+
+		case "G", "end": // Bottom
+			if len(m.tasks) > 0 {
+				m.cursor = len(m.tasks) - 1
+				m.adjustScroll()
+			}
+
+		case "pgup":
+			m.cursor = max(0, m.cursor-m.availableRows())
+			m.adjustScroll()
+
+		case "pgdown":
+			if len(m.tasks) > 0 {
+				m.cursor = min(len(m.tasks)-1, m.cursor+m.availableRows())
+				m.adjustScroll()
 			}
 
 		case "tab":
 			m.activeTab = (m.activeTab + 1) % len(tabs)
 			m.cursor = 0
+			m.scrollOffset = 0
 			m.filterTasks()
 
 		case "shift+tab":
 			m.activeTab = (m.activeTab - 1 + len(tabs)) % len(tabs)
 			m.cursor = 0
+			m.scrollOffset = 0
 			m.filterTasks()
+
+		case "1", "2", "3", "4", "5", "6":
+			tabIdx := int(msg.String()[0] - '1')
+			if tabIdx < len(tabs) {
+				m.activeTab = tabIdx
+				m.cursor = 0
+				m.scrollOffset = 0
+				m.filterTasks()
+			}
+
+		case "s": // Cycle sort column
+			m.sortOrder.CycleNext()
+			SortTasks(m.tasks, m.sortOrder)
+			m.statusMsg = fmt.Sprintf("Sorted by %s", m.sortOrder.Label())
 
 		case "a", "c": // Add / Create task using $EDITOR
 			tmpFile, err := os.CreateTemp("", "tm-create-*.txt")
@@ -334,12 +490,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "e": // Edit selected task using $EDITOR
 			if len(m.tasks) > 0 && m.cursor < len(m.tasks) {
 				t := m.tasks[m.cursor]
+				obs, _ := m.store.ListObservations(ctx, store.ObservationFilter{TaskID: &t.ID})
 				tmpFile, err := os.CreateTemp("", fmt.Sprintf("tm-edit-%d-*.txt", t.ID))
 				if err != nil {
 					m.statusMsg = fmt.Sprintf("Failed to create temporary editor file: %v", err)
 					return m, nil
 				}
-				tmpl := FormatEditTaskTemplate(t)
+				tmpl := FormatEditTaskTemplate(t, m.allTasks, obs)
 				_, _ = tmpFile.WriteString(tmpl)
 				_ = tmpFile.Close()
 
@@ -398,29 +555,45 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) View() string {
 	var s strings.Builder
 
-	// Header
+	// 1. Header with title and tabs
 	s.WriteString(titleStyle.Render("TaskManager TUI"))
 	s.WriteString("  ")
 
-	// Tabs
 	for i, tab := range tabs {
+		tabLabel := tab
+		// Count matching tasks for tab
+		count := m.countForTab(i)
+		tabLabel = fmt.Sprintf("%s (%d)", tab, count)
+
 		if i == m.activeTab {
-			s.WriteString(activeTabStyle.Render(tab))
+			s.WriteString(activeTabStyle.Render(tabLabel))
 		} else {
-			s.WriteString(tabStyle.Render(tab))
+			s.WriteString(tabStyle.Render(tabLabel))
 		}
 		s.WriteString(" ")
 	}
+
+	// Sort & scroll indicator on top right
+	scrollInfo := ""
+	if len(m.tasks) > 0 {
+		visibleEnd := min(len(m.tasks), m.scrollOffset+m.availableRows())
+		scrollInfo = fmt.Sprintf(" [%d-%d/%d | %s]", m.scrollOffset+1, visibleEnd, len(m.tasks), m.sortOrder.Label())
+	}
+	s.WriteString(helpStyle.Render(scrollInfo))
 	s.WriteString("\n\n")
 
-	// Search bar if searching
+	// 2. Search bar
 	if m.viewMode == ModeSearch {
 		s.WriteString(fmt.Sprintf("Search: %s█\n\n", m.searchQuery))
 	} else if m.searchQuery != "" {
-		s.WriteString(fmt.Sprintf("Filtered by: '%s' (press / to change, esc to clear)\n\n", m.searchQuery))
+		s.WriteString(fmt.Sprintf("Filter: '%s' (press / to edit, esc to clear)\n\n", m.searchQuery))
 	}
 
-	// Block reason input prompt
+	// 3. Modal Views
+	if m.viewMode == ModeHelp {
+		return m.renderHelpModal()
+	}
+
 	if m.viewMode == ModeBlockInput {
 		t := m.tasks[m.cursor]
 		s.WriteString(fmt.Sprintf("Enter block reason for #%d '%s': %s█\n(press Enter to confirm, Esc to cancel)\n\n",
@@ -428,7 +601,6 @@ func (m Model) View() string {
 		return s.String()
 	}
 
-	// Observation modal view
 	if m.viewMode == ModeObservations {
 		t := m.tasks[m.cursor]
 		s.WriteString(fmt.Sprintf("=== Observations for Task #%d: %s ===\n\n", t.ID, t.Title))
@@ -436,60 +608,230 @@ func (m Model) View() string {
 			s.WriteString("  No observations recorded for this task.\n")
 		} else {
 			for _, o := range m.observations {
-				s.WriteString(fmt.Sprintf("  • [%s] %s\n", o.CreatedAt.Format("15:04:05"), o.Content))
+				s.WriteString(fmt.Sprintf("  • [%s] %s\n", o.CreatedAt.Format("2006-01-02 15:04:05"), o.Content))
 			}
 		}
 		s.WriteString("\n" + helpStyle.Render("Press Esc or Enter to return to task list"))
 		return s.String()
 	}
 
-	// Task List Table
+	// 4. Task Table Headers with exact cell widths
+	titleWidth := max(20, m.width-colMarkWidth-colIDWidth-colStatusWidth-colPriWidth-colProjectWidth-colTagsWidth-colDepsWidth-colCreatedWidth-18)
+
+	headerRow := lipgloss.JoinHorizontal(lipgloss.Top,
+		lipgloss.NewStyle().Width(colMarkWidth).Render(" "),
+		headerCellStyle.Width(colIDWidth).Render("ID"),
+		headerCellStyle.Width(colStatusWidth).Render("Status"),
+		headerCellStyle.Width(colPriWidth).Render("Pri"),
+		headerCellStyle.Width(colProjectWidth).Render("Project"),
+		headerCellStyle.Width(colTagsWidth).Render("Tags"),
+		headerCellStyle.Width(colDepsWidth).Render("Deps"),
+		headerCellStyle.Width(colCreatedWidth).Render("Created"),
+		headerCellStyle.Width(titleWidth).Render("Title"),
+	)
+	s.WriteString(headerRow + "\n")
+	s.WriteString(strings.Repeat("-", max(70, m.width-2)) + "\n")
+
+	// 5. Task Rows with Viewport Scrolling
 	if len(m.tasks) == 0 {
-		s.WriteString("  No tasks found in this view.\n\n")
+		s.WriteString("  No tasks found in this view.\n")
 	} else {
-		s.WriteString(fmt.Sprintf("  %-4s  %-12s  %-4s  %-12s  %-35s\n", "ID", "Status", "Pri", "Project", "Title"))
-		s.WriteString("  " + strings.Repeat("-", 72) + "\n")
+		visibleRows := m.availableRows()
+		endIdx := min(len(m.tasks), m.scrollOffset+visibleRows)
 
-		for i, t := range m.tasks {
-			cursorMark := " "
-			if i == m.cursor {
-				cursorMark = "▸"
+		for i := m.scrollOffset; i < endIdx; i++ {
+			t := m.tasks[i]
+			isSelected := i == m.cursor
+
+			cursorMark := "  "
+			if isSelected {
+				cursorMark = "▸ "
 			}
 
-			statusStr := string(t.Status)
-			if t.Active {
-				statusStr = inProgressStyle.Render("in_prog*")
-			} else {
-				switch t.Status {
-				case model.StatusCompleted:
-					statusStr = completedStyle.Render(string(t.Status))
-				case model.StatusBlocked:
-					statusStr = blockedStyle.Render(string(t.Status))
-				case model.StatusPending:
-					statusStr = pendingStyle.Render(string(t.Status))
-				}
+			statusStr := m.formatStatusText(t)
+			prioStr := m.formatPriorityText(t.Priority)
+			projectStr := truncate(t.Project, colProjectWidth-1)
+			tagsStr := truncate(strings.Join(t.Tags, ","), colTagsWidth-1)
+
+			var depList []string
+			for _, d := range t.Dependencies {
+				depList = append(depList, strconv.FormatInt(d, 10))
 			}
+			depsStr := truncate(strings.Join(depList, ","), colDepsWidth-1)
+			createdStr := formatAge(t.CreatedAt)
+			titleStr := truncate(t.Title, titleWidth-1)
 
-			row := fmt.Sprintf("%s %-4d  %-12s  %-4s  %-12s  %-35s",
-				cursorMark, t.ID, statusStr, t.Priority, t.Project, t.Title)
+			// Render each column with exact width
+			markCell := lipgloss.NewStyle().Width(colMarkWidth).Render(cursorMark)
+			idCell := lipgloss.NewStyle().Width(colIDWidth).Render(strconv.FormatInt(t.ID, 10))
+			statusCell := lipgloss.NewStyle().Width(colStatusWidth).Render(statusStr)
+			priCell := lipgloss.NewStyle().Width(colPriWidth).Render(prioStr)
+			projectCell := lipgloss.NewStyle().Width(colProjectWidth).Render(projectStr)
+			tagsCell := lipgloss.NewStyle().Width(colTagsWidth).Render(tagsStr)
+			depsCell := lipgloss.NewStyle().Width(colDepsWidth).Render(depsStr)
+			createdCell := lipgloss.NewStyle().Width(colCreatedWidth).Render(createdStr)
+			titleCell := lipgloss.NewStyle().Width(titleWidth).Render(titleStr)
 
-			if i == m.cursor {
-				s.WriteString(selectedRowStyle.Render(row) + "\n")
+			rowLine := lipgloss.JoinHorizontal(lipgloss.Top,
+				markCell,
+				idCell,
+				statusCell,
+				priCell,
+				projectCell,
+				tagsCell,
+				depsCell,
+				createdCell,
+				titleCell,
+			)
+
+			if isSelected {
+				s.WriteString(selectedRowStyle.Render(rowLine) + "\n")
 			} else {
-				s.WriteString(row + "\n")
+				s.WriteString(rowLine + "\n")
 			}
 		}
 	}
 
+	// 6. Status message bar
 	s.WriteString("\n")
 	if m.statusMsg != "" {
 		s.WriteString("Status: " + m.statusMsg + "\n")
 	}
 
-	// Footer help
-	s.WriteString(helpStyle.Render("Controls: j/k: nav • a: add • e: edit • Tab: tab • Enter: start • x: done • b: block • v: notes • /: search • q: quit"))
+	// 7. Footer summary
+	s.WriteString(helpStyle.Render("Controls: j/k: nav • a: add • e: edit • Enter: start • x: done • b: block • s: sort • h: help (all controls) • q: quit"))
 
 	return s.String()
+}
+
+func (m Model) renderHelpModal() string {
+	helpText := `TaskManager TUI — Complete Controls Reference
+
+Navigation:
+  j, k, ↓, ↑        Move cursor down / up
+  g, Home           Jump to top
+  G, End            Jump to bottom
+  PgUp, PgDown      Scroll page up / down
+  Tab / Shift+Tab   Cycle through status tabs
+  1 - 6             Jump directly to tab (1:All, 2:Ready, 3:Pending, 4:InProg, 5:Blocked, 6:Done)
+
+Task Actions (vit-style):
+  a, c              Create new task using $EDITOR (vim/nano)
+  e                 Edit selected task in $EDITOR (modify title, status, tags, deps, notes)
+  Enter             Start task (marks in_progress & active)
+  x                 Mark task completed (done)
+  b                 Block task (prompts for blocker reason)
+  v                 View task notes / observations modal
+
+Filtering & Sorting:
+  /                 Search / filter by text, +tag, +READY, +BLOCKED, project:x, pri:H
+  s                 Cycle column sorting (ID, Priority, Created, Status, Project, Title)
+  h, ?              Open this help window
+  q, Ctrl+C         Quit TaskManager TUI
+
+Press Esc, Enter, or h to return to tasks`
+
+	return modalBoxStyle.Render(helpText)
+}
+
+func (m Model) countForTab(tabIdx int) int {
+	count := 0
+	for _, t := range m.allTasks {
+		vtags := model.ComputeVirtualTags(t, m.allTasks, false)
+		vtagMap := make(map[string]bool)
+		for _, vt := range vtags {
+			vtagMap[vt] = true
+		}
+		switch tabIdx {
+		case 0: // All
+			count++
+		case 1: // Ready
+			if vtagMap["READY"] {
+				count++
+			}
+		case 2: // Pending
+			if t.Status == model.StatusPending {
+				count++
+			}
+		case 3: // In Progress
+			if t.Status == model.StatusInProgress {
+				count++
+			}
+		case 4: // Blocked
+			if vtagMap["BLOCKED"] {
+				count++
+			}
+		case 5: // Completed
+			if t.Status == model.StatusCompleted {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+func (m Model) formatStatusText(t *model.Task) string {
+	if t.Active {
+		return inProgressStyle.Render("in_prog*")
+	}
+	switch t.Status {
+	case model.StatusInProgress:
+		return inProgressStyle.Render("in_progress")
+	case model.StatusCompleted:
+		return completedStyle.Render("completed")
+	case model.StatusBlocked:
+		return blockedStyle.Render("blocked")
+	case model.StatusPending:
+		return pendingStyle.Render("pending")
+	case model.StatusCancelled:
+		return cancelledStyle.Render("cancelled")
+	default:
+		return string(t.Status)
+	}
+}
+
+func (m Model) formatPriorityText(p model.TaskPriority) string {
+	switch p {
+	case model.PriorityCritical:
+		return criticalPrioStyle.Render(string(p))
+	case model.PriorityHigh:
+		return highPrioStyle.Render(string(p))
+	case model.PriorityMedium:
+		return mediumPrioStyle.Render(string(p))
+	case model.PriorityLow:
+		return lowPrioStyle.Render(string(p))
+	default:
+		return string(p)
+	}
+}
+
+func truncate(s string, maxLen int) string {
+	if maxLen <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) > maxLen {
+		if maxLen > 2 {
+			return string(runes[:maxLen-2]) + ".."
+		}
+		return string(runes[:maxLen])
+	}
+	return s
+}
+
+func formatAge(t time.Time) string {
+	d := time.Since(t)
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	}
+	if d < 24*time.Hour {
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	}
+	days := int(d.Hours() / 24)
+	return fmt.Sprintf("%dd", days)
 }
 
 func Run(st *store.Store) error {

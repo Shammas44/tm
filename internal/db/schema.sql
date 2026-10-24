@@ -11,6 +11,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     project TEXT DEFAULT '',
     active INTEGER DEFAULT 0,
     blocker_reason TEXT DEFAULT '',
+    tags TEXT DEFAULT '[]',
+    dependencies TEXT DEFAULT '[]',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     completed_at TIMESTAMP

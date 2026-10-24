@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 
 	"taskmanager/internal/model"
@@ -16,16 +17,20 @@ type ParsedTask struct {
 	Priority      model.TaskPriority
 	Project       string
 	BlockerReason string
+	Tags          []string
+	Dependencies  []int64
 	Description   string
+	NewNote       string
 }
 
 func FormatNewTaskTemplate(defaultProject string) string {
 	var sb strings.Builder
-	sb.WriteString("# TaskManager: Create New Task\n")
+	sb.WriteString("# ==============================================================================\n")
+	sb.WriteString("# TaskManager: Create New Task (vit-style editor)\n")
 	sb.WriteString("# Lines starting with '#' are comments and will be ignored.\n")
 	sb.WriteString("# Save and close the editor to create the task.\n")
 	sb.WriteString("# Valid Priorities: L, M, H, C\n")
-	sb.WriteString("#\n")
+	sb.WriteString("# ==============================================================================\n\n")
 	sb.WriteString("Title: \n")
 	sb.WriteString("Priority: M\n")
 	if defaultProject != "" {
@@ -33,26 +38,77 @@ func FormatNewTaskTemplate(defaultProject string) string {
 	} else {
 		sb.WriteString("Project: \n")
 	}
+	sb.WriteString("Tags: \n")
+	sb.WriteString("Depends: \n")
 	sb.WriteString("Blocker Reason: \n")
+	sb.WriteString("\n")
+	sb.WriteString("# Optional: Enter an initial observation or technical note below:\n")
+	sb.WriteString("New Note: \n")
 	sb.WriteString("\n")
 	sb.WriteString("# Everything below 'Description:' will be treated as the task description.\n")
 	sb.WriteString("Description:\n")
 	return sb.String()
 }
 
-func FormatEditTaskTemplate(t *model.Task) string {
+func FormatEditTaskTemplate(t *model.Task, allTasks []*model.Task, observations []*model.Observation) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("# TaskManager: Edit Task #%d\n", t.ID))
-	sb.WriteString("# Lines starting with '#' are comments and will be ignored.\n")
-	sb.WriteString("# Save and close the editor to commit your modifications.\n")
-	sb.WriteString("# Valid Statuses: pending, in_progress, blocked, completed, cancelled\n")
-	sb.WriteString("# Valid Priorities: L, M, H, C\n")
+	sb.WriteString("# ==============================================================================\n")
+	sb.WriteString(fmt.Sprintf("# READ-ONLY TASK METADATA & NOTE HISTORY: Task #%d\n", t.ID))
+	sb.WriteString(fmt.Sprintf("# Created: %s (%s ago) | Updated: %s\n",
+		t.CreatedAt.Local().Format("2006-01-02 15:04:05"),
+		formatAge(t.CreatedAt),
+		t.UpdatedAt.Local().Format("15:04:05"),
+	))
+
+	// Virtual tags
+	vtags := model.ComputeVirtualTags(t, allTasks, len(observations) > 0)
+	sb.WriteString(fmt.Sprintf("# Virtual Tags: %s\n", strings.Join(vtags, ", ")))
+
+	// Dependencies status
+	if len(t.Dependencies) > 0 {
+		var depStrs []string
+		for _, depID := range t.Dependencies {
+			var otherStatus model.TaskStatus = "unknown"
+			for _, other := range allTasks {
+				if other.ID == depID {
+					otherStatus = other.Status
+					break
+				}
+			}
+			depStrs = append(depStrs, fmt.Sprintf("#%d (%s)", depID, otherStatus))
+		}
+		sb.WriteString(fmt.Sprintf("# Dependencies: %s\n", strings.Join(depStrs, ", ")))
+	}
+
 	sb.WriteString("#\n")
+	sb.WriteString(fmt.Sprintf("# OBSERVATION & NOTE HISTORY (%d recorded):\n", len(observations)))
+	if len(observations) == 0 {
+		sb.WriteString("#   (No observations recorded yet)\n")
+	} else {
+		for _, o := range observations {
+			sb.WriteString(fmt.Sprintf("#   • [%s] %s\n", o.CreatedAt.Local().Format("2006-01-02 15:04:05"), o.Content))
+		}
+	}
+	sb.WriteString("# ==============================================================================\n")
+	sb.WriteString("# EDITABLE TASK FIELDS (Save and close editor to commit changes)\n")
+	sb.WriteString("# Valid Statuses: pending, in_progress, blocked, completed, cancelled\n")
+	sb.WriteString("# Valid Priorities: L, M, H, C\n\n")
+
 	sb.WriteString(fmt.Sprintf("Title: %s\n", t.Title))
 	sb.WriteString(fmt.Sprintf("Status: %s\n", t.Status))
 	sb.WriteString(fmt.Sprintf("Priority: %s\n", t.Priority))
 	sb.WriteString(fmt.Sprintf("Project: %s\n", t.Project))
+	sb.WriteString(fmt.Sprintf("Tags: %s\n", strings.Join(t.Tags, ", ")))
+
+	var depList []string
+	for _, d := range t.Dependencies {
+		depList = append(depList, strconv.FormatInt(d, 10))
+	}
+	sb.WriteString(fmt.Sprintf("Depends: %s\n", strings.Join(depList, ", ")))
 	sb.WriteString(fmt.Sprintf("Blocker Reason: %s\n", t.BlockerReason))
+	sb.WriteString("\n")
+	sb.WriteString("# Add a new observation/note to task history upon saving:\n")
+	sb.WriteString("New Note: \n")
 	sb.WriteString("\n")
 	sb.WriteString("# Everything below 'Description:' will be treated as the task description.\n")
 	sb.WriteString("Description:\n")
@@ -69,6 +125,8 @@ func ParseTaskTemplate(content string) (ParsedTask, error) {
 	var res ParsedTask
 	res.Priority = model.PriorityMedium
 	res.Status = model.StatusPending
+	res.Tags = []string{}
+	res.Dependencies = []int64{}
 
 	scanner := bufio.NewScanner(strings.NewReader(content))
 	inDescription := false
@@ -84,7 +142,6 @@ func ParseTaskTemplate(content string) (ParsedTask, error) {
 		}
 
 		if inDescription {
-			// Inside description section, lines starting with # are still comments if on top
 			if strings.HasPrefix(trimmed, "#") && len(descLines) == 0 {
 				continue
 			}
@@ -123,8 +180,34 @@ func ParseTaskTemplate(content string) (ParsedTask, error) {
 			}
 		case "project":
 			res.Project = val
+		case "tags", "tag":
+			if val != "" {
+				rawTags := strings.FieldsFunc(val, func(r rune) bool {
+					return r == ',' || r == ' ' || r == '\t'
+				})
+				for _, t := range rawTags {
+					tagClean := strings.TrimSpace(strings.TrimPrefix(t, "+"))
+					if tagClean != "" {
+						res.Tags = append(res.Tags, tagClean)
+					}
+				}
+			}
+		case "depends", "dependencies", "dep":
+			if val != "" {
+				rawDeps := strings.FieldsFunc(val, func(r rune) bool {
+					return r == ',' || r == ' ' || r == '\t'
+				})
+				for _, d := range rawDeps {
+					dClean := strings.TrimSpace(strings.TrimPrefix(d, "#"))
+					if id, err := strconv.ParseInt(dClean, 10, 64); err == nil {
+						res.Dependencies = append(res.Dependencies, id)
+					}
+				}
+			}
 		case "blocker reason", "blocker", "block_reason":
 			res.BlockerReason = val
+		case "new note", "note", "observation":
+			res.NewNote = val
 		case "description":
 			inDescription = true
 			if val != "" {

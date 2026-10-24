@@ -296,25 +296,51 @@ Concludes the active session cleanly and declares next steps.
 Full-screen interactive terminal dashboard built with Bubbletea and Lipgloss with an experience inspired by Taskwarrior and `vit`.
 
 * **Launch:** `tm tui`
+* **Column Layout (Pixel-Perfect Visual Alignment):**
+  - `ID`: Task auto-increment identifier
+  - `Status`: Current status (`pending`, `in_progress`, `blocked`, `completed`, `cancelled`) with active indicator (`in_prog*`)
+  - `Pri`: Priority (`C`, `H`, `M`, `L`)
+  - `Project`: Project slug
+  - `Tags`: User-defined labels
+  - `Deps`: Prerequisite task dependencies
+  - `Created`: Elapsed time since task creation (`Age`, e.g. `2m`, `3h`, `5d`)
+  - `Title`: Task description/title
+
 * **Keyboard Navigation & Actions:**
-  * `j` / `k` or `Down` / `Up`: Navigate task list
-  * `a` or `c`: **Create new task** using your `$EDITOR` (vim, nano, etc.)
-  * `e`: **Edit selected task** in `$EDITOR` (modifies title, status, priority, project, description, blocker reason)
-  * `Tab` / `Shift+Tab`: Switch tabs (`All`, `Pending`, `In Progress`, `Blocked`, `Completed`)
-  * `Enter`: Start task (`in_progress`)
-  * `x`: Mark task completed (`done`)
-  * `b`: Open prompt to enter blocker reason
-  * `v`: Open observation viewer modal for the selected task
-  * `/`: Search and filter tasks by title
-  * `q` or `Ctrl+C`: Exit TUI
+  - `j` / `k` or `Down` / `Up`: Navigate task list (with automatic viewport scrolling)
+  - `g` / `Home`: Jump to top of task list
+  - `G` / `End`: Jump to bottom of task list
+  - `PgUp` / `PgDown`: Scroll page up / down
+  - `Tab` / `Shift+Tab`: Cycle through tabs (`All`, `Ready`, `Pending`, `In Progress`, `Blocked`, `Completed`)
+  - `1` - `6`: Jump directly to tab
+  - `a` or `c`: **Create new task** using `$EDITOR`
+  - `e`: **Edit selected task** in `$EDITOR`
+  - `Enter`: Start task (`in_progress` & `active`)
+  - `x`: Mark task completed (`done`)
+  - `b`: Prompt for blocker reason
+  - `v`: Open observation / technical notes history modal
+  - `/`: Enhanced search & filter (`+tag`, `+READY`, `+BLOCKED`, `project:x`, `pri:H`, text)
+  - `s`: Cycle column sorting (`ID ▲`, `Pri ▼`, `Created ▼`, `Status ▲`, `Project ▲`, `Title ▲`)
+  - `h` or `?`: **Open complete controls & shortcuts help window**
+  - `q` or `Ctrl+C`: Exit TUI
 
 #### Editor Integration (`$EDITOR` / `vit`-Style Editing):
-When pressing `a` (create) or `e` (edit), `tm tui` temporarily suspends the terminal and opens your configured editor (`$EDITOR` or `$VISUAL`, defaulting to `vim` / `nano` / `vi`). A structured template is populated:
+When pressing `a` (create) or `e` (edit), `tm tui` suspends the terminal and opens `$EDITOR` (or `$VISUAL`, defaulting to `vim` / `nano` / `vi`).
+
+In edit mode (`e`), the editor displays **read-only task metadata and historical notes** at the top, followed by the editable fields and an optional note entry field:
 
 ```text
-# TaskManager: Edit Task #3
-# Lines starting with '#' are comments and will be ignored.
-# Save and close the editor to commit your modifications.
+# ==============================================================================
+# READ-ONLY TASK METADATA & NOTE HISTORY: Task #1
+# Created: 2026-10-24 10:18:28 (2h ago) | Updated: 11:02:15
+# Virtual Tags: ACTIVE, READY, UNBLOCKED
+# Dependencies: #2 (completed)
+#
+# OBSERVATION & NOTE HISTORY (2 recorded):
+#   • [2026-10-24 10:25:01] ASan detects heap-use-after-free in parser line 42
+#   • [2026-10-24 11:02:15] Completed reproduction unit test in tests/test_parser.c
+# ==============================================================================
+# EDITABLE TASK FIELDS (Save and close editor to commit changes)
 # Valid Statuses: pending, in_progress, blocked, completed, cancelled
 # Valid Priorities: L, M, H, C
 
@@ -322,13 +348,32 @@ Title: Implement multiplication error handling
 Status: in_progress
 Priority: H
 Project: calc
+Tags: math, compiler
+Depends: 2
 Blocker Reason: 
+
+# Add a new observation/note to task history upon saving:
+New Note: Found that IEEE 754 overflow traps can be avoided with flag checks
 
 # Everything below 'Description:' will be treated as the task description.
 Description:
 Verify divide-by-zero returns error code and test with ASan.
 ```
-Saving and closing your editor immediately validates and commits the changes into SQLite and refreshes the TUI dashboard. Exiting without a title cancels the operation.
+
+Saving and closing the editor immediately updates the task, appends the new note (if provided) into the FTS5-indexed observation history, updates the session checkpoint, and refreshes the TUI. Exiting without a title cancels the operation.
+
+#### Virtual Tags (Taskwarrior-Style):
+`tm` dynamically computes synthetic virtual tags based on task dependencies and state:
+* `READY`: Pending tasks whose prerequisites are all completed and have no blockers.
+* `ACTIVE`: Currently active / in-progress tasks.
+* `BLOCKED`: Tasks blocked by a reason or by incomplete prerequisite dependencies.
+* `UNBLOCKED`: Tasks with zero blocking dependencies.
+* `BLOCKING`: Incomplete tasks that another task depends on.
+* `HAS_NOTE`: Tasks with recorded observations or descriptions.
+* `TODAY`: Tasks created today.
+* `PRI_CRIT` / `PRI_HIGH` / `PRI_MED` / `PRI_LOW`: Priority tags.
+
+In the search prompt (`/`), you can filter with `+READY`, `+BLOCKED`, `+tag`, or exclude with `-tag`.
 
 ---
 

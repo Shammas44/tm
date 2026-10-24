@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -31,13 +32,22 @@ func (s *Store) CreateTask(ctx context.Context, task *model.Task) (*model.Task, 
 	if task.Priority == "" {
 		task.Priority = model.PriorityMedium
 	}
+	if task.Tags == nil {
+		task.Tags = []string{}
+	}
+	if task.Dependencies == nil {
+		task.Dependencies = []int64{}
+	}
 	now := time.Now().UTC()
 	task.CreatedAt = now
 	task.UpdatedAt = now
 
+	tagsJSON, _ := json.Marshal(task.Tags)
+	depsJSON, _ := json.Marshal(task.Dependencies)
+
 	query := `
-		INSERT INTO tasks (title, description, status, priority, project, active, blocker_reason, created_at, updated_at, completed_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO tasks (title, description, status, priority, project, active, blocker_reason, tags, dependencies, created_at, updated_at, completed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	activeInt := 0
 	if task.Active {
@@ -52,6 +62,8 @@ func (s *Store) CreateTask(ctx context.Context, task *model.Task) (*model.Task, 
 		task.Project,
 		activeInt,
 		task.BlockerReason,
+		string(tagsJSON),
+		string(depsJSON),
 		task.CreatedAt.Format(time.RFC3339),
 		task.UpdatedAt.Format(time.RFC3339),
 		formatNullableTime(task.CompletedAt),
@@ -70,7 +82,7 @@ func (s *Store) CreateTask(ctx context.Context, task *model.Task) (*model.Task, 
 
 func (s *Store) GetTask(ctx context.Context, id int64) (*model.Task, error) {
 	query := `
-		SELECT id, title, description, status, priority, project, active, blocker_reason, created_at, updated_at, completed_at
+		SELECT id, title, description, status, priority, project, active, blocker_reason, tags, dependencies, created_at, updated_at, completed_at
 		FROM tasks WHERE id = ?
 	`
 	row := s.db.QueryRowContext(ctx, query, id)
@@ -79,7 +91,7 @@ func (s *Store) GetTask(ctx context.Context, id int64) (*model.Task, error) {
 
 func (s *Store) GetActiveTask(ctx context.Context, project string) (*model.Task, error) {
 	query := `
-		SELECT id, title, description, status, priority, project, active, blocker_reason, created_at, updated_at, completed_at
+		SELECT id, title, description, status, priority, project, active, blocker_reason, tags, dependencies, created_at, updated_at, completed_at
 		FROM tasks WHERE active = 1
 	`
 	var args []any
@@ -101,7 +113,6 @@ func (s *Store) SetActiveTask(ctx context.Context, id int64) error {
 		return fmt.Errorf("failed to unset existing active tasks: %w", err)
 	}
 
-	// Set active and in_progress on the target task
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE tasks
 		SET active = 1, status = ?, blocker_reason = '', updated_at = ?
@@ -171,6 +182,15 @@ func (s *Store) UpdateTask(ctx context.Context, task *model.Task) error {
 		task.CompletedAt = nil
 	}
 
+	if task.Tags == nil {
+		task.Tags = []string{}
+	}
+	if task.Dependencies == nil {
+		task.Dependencies = []int64{}
+	}
+	tagsJSON, _ := json.Marshal(task.Tags)
+	depsJSON, _ := json.Marshal(task.Dependencies)
+
 	activeInt := 0
 	if task.Active {
 		activeInt = 1
@@ -179,7 +199,7 @@ func (s *Store) UpdateTask(ctx context.Context, task *model.Task) error {
 
 	query := `
 		UPDATE tasks
-		SET title = ?, description = ?, status = ?, priority = ?, project = ?, active = ?, blocker_reason = ?, updated_at = ?, completed_at = ?
+		SET title = ?, description = ?, status = ?, priority = ?, project = ?, active = ?, blocker_reason = ?, tags = ?, dependencies = ?, updated_at = ?, completed_at = ?
 		WHERE id = ?
 	`
 	res, err := s.db.ExecContext(ctx, query,
@@ -190,6 +210,8 @@ func (s *Store) UpdateTask(ctx context.Context, task *model.Task) error {
 		task.Project,
 		activeInt,
 		task.BlockerReason,
+		string(tagsJSON),
+		string(depsJSON),
 		task.UpdatedAt.Format(time.RFC3339),
 		formatNullableTime(task.CompletedAt),
 		task.ID,
@@ -225,7 +247,7 @@ func (s *Store) DeleteTask(ctx context.Context, id int64) error {
 }
 
 func (s *Store) ListTasks(ctx context.Context, filter TaskFilter) ([]*model.Task, error) {
-	query := `SELECT id, title, description, status, priority, project, active, blocker_reason, created_at, updated_at, completed_at FROM tasks WHERE 1=1`
+	query := `SELECT id, title, description, status, priority, project, active, blocker_reason, tags, dependencies, created_at, updated_at, completed_at FROM tasks WHERE 1=1`
 	var args []any
 
 	if !filter.IncludeDeleted {
@@ -292,7 +314,7 @@ func scanTask(row *sql.Row) (*model.Task, error) {
 	var activeInt int
 	var createdAtRaw, updatedAtRaw string
 	var completedAtRaw sql.NullString
-	var desc, blockerReason, project sql.NullString
+	var desc, blockerReason, project, tagsRaw, depsRaw sql.NullString
 
 	err := row.Scan(
 		&task.ID,
@@ -303,6 +325,8 @@ func scanTask(row *sql.Row) (*model.Task, error) {
 		&project,
 		&activeInt,
 		&blockerReason,
+		&tagsRaw,
+		&depsRaw,
 		&createdAtRaw,
 		&updatedAtRaw,
 		&completedAtRaw,
@@ -318,6 +342,18 @@ func scanTask(row *sql.Row) (*model.Task, error) {
 	task.Project = project.String
 	task.Active = activeInt == 1
 	task.BlockerReason = blockerReason.String
+	if tagsRaw.Valid && tagsRaw.String != "" {
+		_ = json.Unmarshal([]byte(tagsRaw.String), &task.Tags)
+	}
+	if depsRaw.Valid && depsRaw.String != "" {
+		_ = json.Unmarshal([]byte(depsRaw.String), &task.Dependencies)
+	}
+	if task.Tags == nil {
+		task.Tags = []string{}
+	}
+	if task.Dependencies == nil {
+		task.Dependencies = []int64{}
+	}
 	task.CreatedAt = parseTime(createdAtRaw)
 	task.UpdatedAt = parseTime(updatedAtRaw)
 	if completedAtRaw.Valid {
@@ -332,7 +368,7 @@ func scanTaskRow(rows *sql.Rows) (*model.Task, error) {
 	var activeInt int
 	var createdAtRaw, updatedAtRaw string
 	var completedAtRaw sql.NullString
-	var desc, blockerReason, project sql.NullString
+	var desc, blockerReason, project, tagsRaw, depsRaw sql.NullString
 
 	err := rows.Scan(
 		&task.ID,
@@ -343,6 +379,8 @@ func scanTaskRow(rows *sql.Rows) (*model.Task, error) {
 		&project,
 		&activeInt,
 		&blockerReason,
+		&tagsRaw,
+		&depsRaw,
 		&createdAtRaw,
 		&updatedAtRaw,
 		&completedAtRaw,
@@ -355,6 +393,18 @@ func scanTaskRow(rows *sql.Rows) (*model.Task, error) {
 	task.Project = project.String
 	task.Active = activeInt == 1
 	task.BlockerReason = blockerReason.String
+	if tagsRaw.Valid && tagsRaw.String != "" {
+		_ = json.Unmarshal([]byte(tagsRaw.String), &task.Tags)
+	}
+	if depsRaw.Valid && depsRaw.String != "" {
+		_ = json.Unmarshal([]byte(depsRaw.String), &task.Dependencies)
+	}
+	if task.Tags == nil {
+		task.Tags = []string{}
+	}
+	if task.Dependencies == nil {
+		task.Dependencies = []int64{}
+	}
 	task.CreatedAt = parseTime(createdAtRaw)
 	task.UpdatedAt = parseTime(updatedAtRaw)
 	if completedAtRaw.Valid {

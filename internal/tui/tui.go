@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -49,6 +50,13 @@ const (
 	ModeSearch
 	ModeBlockInput
 )
+
+type editorDoneMsg struct {
+	mode     string // "create" or "edit"
+	taskID   int64
+	tempPath string
+	err      error
+}
 
 type Model struct {
 	store        *store.Store
@@ -133,6 +141,79 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		return m, nil
+
+	case editorDoneMsg:
+		contentBytes, readErr := os.ReadFile(msg.tempPath)
+		_ = os.Remove(msg.tempPath)
+
+		if msg.err != nil {
+			m.statusMsg = fmt.Sprintf("Editor error: %v", msg.err)
+			return m, nil
+		}
+		if readErr != nil {
+			m.statusMsg = fmt.Sprintf("Failed to read editor output: %v", readErr)
+			return m, nil
+		}
+
+		parsed, err := ParseTaskTemplate(string(contentBytes))
+		if err != nil {
+			m.statusMsg = fmt.Sprintf("Failed to parse task: %v", err)
+			return m, nil
+		}
+
+		if strings.TrimSpace(parsed.Title) == "" {
+			m.statusMsg = "Cancelled (empty task title)"
+			return m, nil
+		}
+
+		if msg.mode == "create" {
+			newTask := &model.Task{
+				Title:         parsed.Title,
+				Status:        parsed.Status,
+				Priority:      parsed.Priority,
+				Project:       parsed.Project,
+				Description:   parsed.Description,
+				BlockerReason: parsed.BlockerReason,
+			}
+			created, err := m.store.CreateTask(ctx, newTask)
+			if err != nil {
+				m.statusMsg = fmt.Sprintf("Failed to create task: %v", err)
+				return m, nil
+			}
+			if created.Status == model.StatusInProgress {
+				_ = m.store.SetActiveTask(ctx, created.ID)
+			}
+			m.statusMsg = fmt.Sprintf("Created task #%d: %s", created.ID, created.Title)
+			m.reloadTasks()
+			return m, nil
+		}
+
+		if msg.mode == "edit" {
+			existing, err := m.store.GetTask(ctx, msg.taskID)
+			if err != nil {
+				m.statusMsg = fmt.Sprintf("Failed to find task #%d: %v", msg.taskID, err)
+				return m, nil
+			}
+			existing.Title = parsed.Title
+			existing.Status = parsed.Status
+			existing.Priority = parsed.Priority
+			existing.Project = parsed.Project
+			existing.Description = parsed.Description
+			existing.BlockerReason = parsed.BlockerReason
+
+			if existing.Status == model.StatusInProgress {
+				_ = m.store.SetActiveTask(ctx, existing.ID)
+				_ = m.store.UpdateTask(ctx, existing)
+			} else {
+				if err := m.store.UpdateTask(ctx, existing); err != nil {
+					m.statusMsg = fmt.Sprintf("Failed to update task #%d: %v", existing.ID, err)
+					return m, nil
+				}
+			}
+			m.statusMsg = fmt.Sprintf("Updated task #%d: %s", existing.ID, existing.Title)
+			m.reloadTasks()
+			return m, nil
+		}
 
 	case tea.KeyMsg:
 		if m.viewMode == ModeObservations {
@@ -226,6 +307,52 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.activeTab = (m.activeTab - 1 + len(tabs)) % len(tabs)
 			m.cursor = 0
 			m.filterTasks()
+
+		case "a", "c": // Add / Create task using $EDITOR
+			tmpFile, err := os.CreateTemp("", "tm-create-*.txt")
+			if err != nil {
+				m.statusMsg = fmt.Sprintf("Failed to create temporary editor file: %v", err)
+				return m, nil
+			}
+			defaultProject := ""
+			if len(m.tasks) > 0 && m.cursor < len(m.tasks) {
+				defaultProject = m.tasks[m.cursor].Project
+			}
+			tmpl := FormatNewTaskTemplate(defaultProject)
+			_, _ = tmpFile.WriteString(tmpl)
+			_ = tmpFile.Close()
+
+			cmd := ResolveEditorCommand(tmpFile.Name())
+			return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
+				return editorDoneMsg{
+					mode:     "create",
+					tempPath: tmpFile.Name(),
+					err:      err,
+				}
+			})
+
+		case "e": // Edit selected task using $EDITOR
+			if len(m.tasks) > 0 && m.cursor < len(m.tasks) {
+				t := m.tasks[m.cursor]
+				tmpFile, err := os.CreateTemp("", fmt.Sprintf("tm-edit-%d-*.txt", t.ID))
+				if err != nil {
+					m.statusMsg = fmt.Sprintf("Failed to create temporary editor file: %v", err)
+					return m, nil
+				}
+				tmpl := FormatEditTaskTemplate(t)
+				_, _ = tmpFile.WriteString(tmpl)
+				_ = tmpFile.Close()
+
+				cmd := ResolveEditorCommand(tmpFile.Name())
+				return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
+					return editorDoneMsg{
+						mode:     "edit",
+						taskID:   t.ID,
+						tempPath: tmpFile.Name(),
+						err:      err,
+					}
+				})
+			}
 
 		case "enter": // Start task
 			if len(m.tasks) > 0 && m.cursor < len(m.tasks) {
@@ -360,7 +487,7 @@ func (m Model) View() string {
 	}
 
 	// Footer help
-	s.WriteString(helpStyle.Render("Controls: j/k: navigate • Tab: switch tab • Enter: start • x: complete • b: block • v: notes • /: search • q: quit"))
+	s.WriteString(helpStyle.Render("Controls: j/k: nav • a: add • e: edit • Tab: tab • Enter: start • x: done • b: block • v: notes • /: search • q: quit"))
 
 	return s.String()
 }

@@ -141,11 +141,14 @@ Cleanly concludes the current session.
 ---
 
 ### Command 7: `tm tui`
-Interactive full-screen terminal dashboard for developers.
+Interactive full-screen terminal dashboard for developers with a `vit`-inspired editor workflow.
 
 * **Built with**: `charmbracelet/bubbletea` and `lipgloss`.
 * **Features**:
   * Keyboard navigation (`j`/`k`, arrow keys).
+  * External editor integration via `$EDITOR` / `$VISUAL` (defaults to `vim` / `nano` / `vi`):
+    * `a` or `c`: Creates a new task in editor using structured template.
+    * `e`: Edits the selected task (title, status, priority, project, description, blocker reason).
   * Filter tabs: All, Pending, In Progress, Blocked, Done.
   * Instant status toggle (`Enter` to start, `x` to mark done, `b` to block).
   * Observation viewer modal (`v`).

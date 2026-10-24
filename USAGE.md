@@ -293,11 +293,13 @@ Concludes the active session cleanly and declares next steps.
 ---
 
 ### `tm tui`
-Full-screen interactive terminal dashboard built with Bubbletea and Lipgloss.
+Full-screen interactive terminal dashboard built with Bubbletea and Lipgloss with an experience inspired by Taskwarrior and `vit`.
 
 * **Launch:** `tm tui`
-* **Keyboard Navigation:**
+* **Keyboard Navigation & Actions:**
   * `j` / `k` or `Down` / `Up`: Navigate task list
+  * `a` or `c`: **Create new task** using your `$EDITOR` (vim, nano, etc.)
+  * `e`: **Edit selected task** in `$EDITOR` (modifies title, status, priority, project, description, blocker reason)
   * `Tab` / `Shift+Tab`: Switch tabs (`All`, `Pending`, `In Progress`, `Blocked`, `Completed`)
   * `Enter`: Start task (`in_progress`)
   * `x`: Mark task completed (`done`)
@@ -305,6 +307,28 @@ Full-screen interactive terminal dashboard built with Bubbletea and Lipgloss.
   * `v`: Open observation viewer modal for the selected task
   * `/`: Search and filter tasks by title
   * `q` or `Ctrl+C`: Exit TUI
+
+#### Editor Integration (`$EDITOR` / `vit`-Style Editing):
+When pressing `a` (create) or `e` (edit), `tm tui` temporarily suspends the terminal and opens your configured editor (`$EDITOR` or `$VISUAL`, defaulting to `vim` / `nano` / `vi`). A structured template is populated:
+
+```text
+# TaskManager: Edit Task #3
+# Lines starting with '#' are comments and will be ignored.
+# Save and close the editor to commit your modifications.
+# Valid Statuses: pending, in_progress, blocked, completed, cancelled
+# Valid Priorities: L, M, H, C
+
+Title: Implement multiplication error handling
+Status: in_progress
+Priority: H
+Project: calc
+Blocker Reason: 
+
+# Everything below 'Description:' will be treated as the task description.
+Description:
+Verify divide-by-zero returns error code and test with ASan.
+```
+Saving and closing your editor immediately validates and commits the changes into SQLite and refreshes the TUI dashboard. Exiting without a title cancels the operation.
 
 ---
 

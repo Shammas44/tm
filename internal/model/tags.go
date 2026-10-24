@@ -35,7 +35,7 @@ func ComputeVirtualTags(t *Task, allTasks []*Task, hasObservations bool) []strin
 	}
 
 	// Dependency & Blocker virtual tags
-	isBlocked := t.Status == StatusBlocked || t.BlockerReason != ""
+	isBlocked := t.Status == StatusBlocked || t.Blocker != ""
 	if !isBlocked && len(t.Dependencies) > 0 {
 		// Check if any prerequisite is incomplete
 		completedMap := make(map[int64]bool)

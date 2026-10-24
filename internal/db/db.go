@@ -40,6 +40,8 @@ func Open(dbPath string) (*sql.DB, error) {
 	// Incremental migrations for existing databases
 	_, _ = db.Exec("ALTER TABLE tasks ADD COLUMN tags TEXT DEFAULT '[]'")
 	_, _ = db.Exec("ALTER TABLE tasks ADD COLUMN dependencies TEXT DEFAULT '[]'")
+	_, _ = db.Exec("ALTER TABLE tasks ADD COLUMN blocker TEXT DEFAULT ''")
+	_, _ = db.Exec("UPDATE tasks SET blocker = blocker_reason WHERE (blocker = '' OR blocker IS NULL) AND (blocker_reason != '' AND blocker_reason IS NOT NULL)")
 
 	return db, nil
 }

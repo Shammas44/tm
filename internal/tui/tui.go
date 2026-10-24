@@ -108,10 +108,8 @@ type Model struct {
 	selectedCol      int // Selected column index (0 to TotalColumns-1)
 	scrollOffset     int // Top visible row index
 	helpScrollOffset int
-	previewScroll    int
 	sortOrder        SortOrder
 	viewMode         ViewMode
-	selectedTaskObs  []*model.Observation // For bottom readonly inspection pane
 	searchQuery      string
 	commandInput     string // For Vim command mode ':'
 	blockInput       string
@@ -153,22 +151,6 @@ func (m *Model) reloadTasks() {
 	m.obsCounts = counts
 
 	m.filterTasks()
-	m.loadSelectedTaskObs()
-}
-
-func (m *Model) loadSelectedTaskObs() {
-	if len(m.tasks) == 0 || m.cursor >= len(m.tasks) {
-		m.selectedTaskObs = nil
-		return
-	}
-	ctx := context.Background()
-	taskID := m.tasks[m.cursor].ID
-	obs, err := m.store.ListObservations(ctx, store.ObservationFilter{TaskID: &taskID})
-	if err == nil {
-		m.selectedTaskObs = obs
-	} else {
-		m.selectedTaskObs = nil
-	}
 }
 
 func (m *Model) filterTasks() {
@@ -244,26 +226,13 @@ func (m Model) topSectionOverhead() int {
 }
 
 func (m Model) availableRows() int {
-	// Task list takes half of screen height
-	halfTop := m.height / 2
-	overhead := m.topSectionOverhead()
-	rows := halfTop - overhead
-	if rows < 2 {
-		return 2
-	}
-	return rows
-}
-
-func (m Model) previewPaneHeight() int {
-	// Task details takes the other half of screen height
-	halfTop := m.height / 2
-	halfBottom := m.height - halfTop
-	// 1 line for details separator, 1 line for command/spacing footer
-	p := halfBottom - 2
-	if p < 3 {
+	// Full screen height available for task list
+	overhead := m.topSectionOverhead() + 1 // +1 for command mode / bottom spacing line
+	rows := m.height - overhead
+	if rows < 3 {
 		return 3
 	}
-	return p
+	return rows
 }
 
 func (m Model) Init() tea.Cmd {
@@ -312,16 +281,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if msg.mode == "create" {
 			newTask := &model.Task{
-				Title:         parsed.Title,
-				Status:        parsed.Status,
-				Priority:      parsed.Priority,
-				Project:       parsed.Project,
-				Description:   parsed.Description,
-				BlockerReason: parsed.BlockerReason,
-				Tags:          parsed.Tags,
-				Dependencies:  parsed.Dependencies,
+				Title:        parsed.Title,
+				Status:       parsed.Status,
+				Priority:     parsed.Priority,
+				Project:      parsed.Project,
+				Description:  parsed.Description,
+				Blocker:      parsed.Blocker,
+				Tags:         parsed.Tags,
+				Dependencies: parsed.Dependencies,
 			}
-			if strings.TrimSpace(parsed.BlockerReason) != "" {
+			if strings.TrimSpace(parsed.Blocker) != "" {
 				newTask.Status = model.StatusBlocked
 			}
 			created, err := m.store.CreateTask(ctx, newTask)
@@ -333,8 +302,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				_ = m.store.SetActiveTask(ctx, created.ID)
 			}
 
-			if strings.TrimSpace(parsed.NewNote) != "" {
-				_, _ = m.store.AddObservation(ctx, sessionID, &created.ID, parsed.NewNote)
+			// Add observations defined in notes
+			for _, content := range parsed.ExistingNotes {
+				if strings.TrimSpace(content) != "" {
+					_, _ = m.store.AddObservation(ctx, sessionID, &created.ID, strings.TrimSpace(content))
+				}
+			}
+			for _, newNote := range parsed.NewNotes {
+				if strings.TrimSpace(newNote) != "" {
+					_, _ = m.store.AddObservation(ctx, sessionID, &created.ID, strings.TrimSpace(newNote))
+				}
 			}
 
 			if activeSession != nil {
@@ -357,10 +334,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			existing.Priority = parsed.Priority
 			existing.Project = parsed.Project
 			existing.Description = parsed.Description
-			existing.BlockerReason = parsed.BlockerReason
+			existing.Blocker = parsed.Blocker
 			existing.Tags = parsed.Tags
 			existing.Dependencies = parsed.Dependencies
-			if strings.TrimSpace(parsed.BlockerReason) != "" {
+			if strings.TrimSpace(parsed.Blocker) != "" {
 				existing.Status = model.StatusBlocked
 			}
 
@@ -376,7 +353,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// Modify / delete existing observations based on editor changes
 			origObs, _ := m.store.ListObservations(ctx, store.ObservationFilter{TaskID: &existing.ID})
+			origIDs := make(map[int64]bool)
 			for _, o := range origObs {
+				origIDs[o.ID] = true
 				if newContent, found := parsed.ExistingNotes[o.ID]; found {
 					trimmedContent := strings.TrimSpace(newContent)
 					if trimmedContent == "" {
@@ -389,8 +368,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
-			if strings.TrimSpace(parsed.NewNote) != "" {
-				_, _ = m.store.AddObservation(ctx, sessionID, &existing.ID, parsed.NewNote)
+			// Add newly added notes
+			for id, content := range parsed.ExistingNotes {
+				if !origIDs[id] && strings.TrimSpace(content) != "" {
+					_, _ = m.store.AddObservation(ctx, sessionID, &existing.ID, strings.TrimSpace(content))
+				}
+			}
+			for _, newNote := range parsed.NewNotes {
+				if strings.TrimSpace(newNote) != "" {
+					_, _ = m.store.AddObservation(ctx, sessionID, &existing.ID, strings.TrimSpace(newNote))
+				}
 			}
 
 			if activeSession != nil {
@@ -444,7 +431,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.searchQuery = ""
 				m.viewMode = ModeList
 				m.filterTasks()
-				m.loadSelectedTaskObs()
 				return m, nil
 			case "enter":
 				m.viewMode = ModeList
@@ -453,14 +439,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if len(m.searchQuery) > 0 {
 					m.searchQuery = m.searchQuery[:len(m.searchQuery)-1]
 					m.filterTasks()
-					m.loadSelectedTaskObs()
 				}
 				return m, nil
 			default:
 				if len(msg.String()) == 1 {
 					m.searchQuery += msg.String()
 					m.filterTasks()
-					m.loadSelectedTaskObs()
 				}
 				return m, nil
 			}
@@ -554,10 +538,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.lastKey == 'g' && now.Sub(m.lastKeyPressTime) < 800*time.Millisecond {
 				m.cursor = 0
 				m.scrollOffset = 0
-				m.previewScroll = 0
 				m.lastKey = 0
 				m.adjustScroll()
-				m.loadSelectedTaskObs()
 				return m, nil
 			}
 			m.lastKey = 'g'
@@ -586,27 +568,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "up", "k":
 			if m.cursor > 0 {
 				m.cursor--
-				m.previewScroll = 0
 				m.adjustScroll()
-				m.loadSelectedTaskObs()
 			}
 
 		case "down", "j":
 			if m.cursor < len(m.tasks)-1 {
 				m.cursor++
-				m.previewScroll = 0
 				m.adjustScroll()
-				m.loadSelectedTaskObs()
 			}
 
-		// Scroll detail inspection pane up / down
-		case "J", "ctrl+d":
-			m.previewScroll += 2
-
-		case "K", "ctrl+u":
-			if m.previewScroll > 0 {
-				m.previewScroll -= 2
+		// Half-page scroll
+		case "ctrl+d", "J":
+			if len(m.tasks) > 0 {
+				step := max(1, m.availableRows()/2)
+				m.cursor = min(len(m.tasks)-1, m.cursor+step)
+				m.adjustScroll()
 			}
+
+		case "ctrl+u", "K":
+			step := max(1, m.availableRows()/2)
+			m.cursor = max(0, m.cursor-step)
+			m.adjustScroll()
 
 		// Requirement 1: Horizontal column navigation
 		case "left", "h":
@@ -622,46 +604,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "home":
 			m.cursor = 0
 			m.scrollOffset = 0
-			m.previewScroll = 0
-			m.loadSelectedTaskObs()
 
 		case "G", "end":
 			if len(m.tasks) > 0 {
 				m.cursor = len(m.tasks) - 1
-				m.previewScroll = 0
 				m.adjustScroll()
-				m.loadSelectedTaskObs()
 			}
 
 		case "pgup":
 			m.cursor = max(0, m.cursor-m.availableRows())
-			m.previewScroll = 0
 			m.adjustScroll()
-			m.loadSelectedTaskObs()
 
 		case "pgdown":
 			if len(m.tasks) > 0 {
 				m.cursor = min(len(m.tasks)-1, m.cursor+m.availableRows())
-				m.previewScroll = 0
 				m.adjustScroll()
-				m.loadSelectedTaskObs()
 			}
 
 		case "tab":
 			m.activeTab = (m.activeTab + 1) % len(tabs)
 			m.cursor = 0
 			m.scrollOffset = 0
-			m.previewScroll = 0
 			m.filterTasks()
-			m.loadSelectedTaskObs()
 
 		case "shift+tab":
 			m.activeTab = (m.activeTab - 1 + len(tabs)) % len(tabs)
 			m.cursor = 0
 			m.scrollOffset = 0
-			m.previewScroll = 0
 			m.filterTasks()
-			m.loadSelectedTaskObs()
 
 		case "1", "2", "3", "4", "5", "6":
 			tabIdx := int(msg.String()[0] - '1')
@@ -669,9 +639,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.activeTab = tabIdx
 				m.cursor = 0
 				m.scrollOffset = 0
-				m.previewScroll = 0
 				m.filterTasks()
-				m.loadSelectedTaskObs()
 			}
 
 		// Requirement 1: Sort by selected column, toggle direction if pressed again
@@ -1339,13 +1307,10 @@ func (m Model) View() string {
 		}
 	}
 
-	// Pad unused rows so task list consistently occupies top half of screen height
+	// Pad unused rows so task list fills available height
 	for r := renderedRows; r < visibleRows; r++ {
 		s.WriteString("\n")
 	}
-
-	// 6. Requirement 7: Readonly Detail Inspection Pane (occupies bottom half of screen height)
-	s.WriteString(m.renderDetailPane())
 
 	// Command Mode Input or clean spacing line
 	if m.viewMode == ModeCommand {
@@ -1355,169 +1320,6 @@ func (m Model) View() string {
 	}
 
 	return s.String()
-}
-
-// Requirement 7: Readonly pane inspecting description (left) and observations (right)
-func (m Model) renderDetailPane() string {
-	paneHeight := m.previewPaneHeight()
-
-	if len(m.tasks) == 0 || m.cursor >= len(m.tasks) {
-		sep := strings.Repeat("─", max(40, m.width-2))
-		var sb strings.Builder
-		sb.WriteString(paneSubStyle.Render(sep) + "\n")
-		sb.WriteString(paneSubStyle.Render("  (No task selected)\n"))
-		for i := 2; i < paneHeight; i++ {
-			sb.WriteString("\n")
-		}
-		return sb.String()
-	}
-
-	t := m.tasks[m.cursor]
-
-	// Determine split widths
-	sepStr := " │ "
-	sepLen := len(sepStr)
-	availableWidth := max(40, m.width)
-	leftWidth := (availableWidth - sepLen) / 2
-	if leftWidth < 20 {
-		leftWidth = 20
-	}
-	rightWidth := max(20, availableWidth-leftWidth-sepLen)
-
-	// Left column: Description & Prerequisites
-	var leftLines []string
-	desc := strings.TrimSpace(t.Description)
-	if desc != "" {
-		leftLines = append(leftLines, paneBarHead.Render("Description:"))
-		descWrapped := wrapText(desc, max(15, leftWidth-2), "  ")
-		for _, dl := range descWrapped {
-			leftLines = append(leftLines, dl)
-		}
-	}
-
-	if len(t.Dependencies) > 0 {
-		var blockingDeps []string
-		for _, depID := range t.Dependencies {
-			var depTask *model.Task
-			for _, other := range m.allTasks {
-				if other.ID == depID {
-					depTask = other
-					break
-				}
-			}
-			if depTask != nil && depTask.Status != model.StatusCompleted {
-				blockingDeps = append(blockingDeps, fmt.Sprintf("#%d %q (%s)", depTask.ID, truncate(depTask.Title, max(10, leftWidth-16)), strings.ToUpper(string(depTask.Status))))
-			} else if depTask == nil {
-				blockingDeps = append(blockingDeps, fmt.Sprintf("#%d (unknown)", depID))
-			}
-		}
-		if len(blockingDeps) > 0 {
-			leftLines = append(leftLines, blockedStyle.Render("Prerequisites:"))
-			for _, bd := range blockingDeps {
-				leftLines = append(leftLines, "  "+bd)
-			}
-		} else if t.Status == model.StatusPending {
-			leftLines = append(leftLines, completedStyle.Render("✓ Prerequisites completed"))
-		}
-	}
-
-	if len(leftLines) == 0 {
-		leftLines = append(leftLines, paneSubStyle.Render("(No description recorded)"))
-	}
-
-	// Right column: Observations & Blocker (blocker is considered an observation and put in evidence first)
-	var rightLines []string
-	hasBlocker := strings.TrimSpace(t.BlockerReason) != ""
-	totalObsCount := len(m.selectedTaskObs)
-	if hasBlocker {
-		totalObsCount++
-	}
-
-	if totalObsCount > 0 {
-		rightLines = append(rightLines, paneBarHead.Render(fmt.Sprintf("Observation (%d recorded):", totalObsCount)))
-
-		// Blocker put in evidence as the first observation
-		if hasBlocker {
-			rightLines = append(rightLines, blockedStyle.Render("• [BLOCKER] Blocker Reason:"))
-			blockerWrapped := wrapText(strings.TrimSpace(t.BlockerReason), max(15, rightWidth-2), "  ")
-			for _, bl := range blockerWrapped {
-				rightLines = append(rightLines, bl)
-			}
-		}
-
-		// Observations with nicer bullet '•' and no extra newline chars between items to maximize space
-		for _, o := range m.selectedTaskObs {
-			headerLine := fmt.Sprintf("• [%s] (#%d)", o.CreatedAt.Local().Format("2006-01-02 15:04"), o.ID)
-			rightLines = append(rightLines, paneSubStyle.Render(headerLine))
-
-			contentLines := strings.Split(strings.TrimSpace(o.Content), "\n")
-			for _, rawLine := range contentLines {
-				rawLine = strings.TrimSpace(rawLine)
-				if rawLine == "" {
-					continue
-				}
-				wrapped := wrapText(rawLine, max(15, rightWidth-2), "  ")
-				for _, wl := range wrapped {
-					rightLines = append(rightLines, wl)
-				}
-			}
-		}
-	} else {
-		rightLines = append(rightLines, paneSubStyle.Render("(No observations recorded)"))
-	}
-
-	// Calculate scrolling
-	totalLines := max(len(leftLines), len(rightLines))
-	maxScroll := max(0, totalLines-paneHeight)
-	if m.previewScroll > maxScroll {
-		m.previewScroll = maxScroll
-	}
-	if m.previewScroll < 0 {
-		m.previewScroll = 0
-	}
-
-	scrollHint := ""
-	if totalLines > paneHeight {
-		scrollHint = fmt.Sprintf(" [%d-%d of %d • J/K to scroll] ",
-			m.previewScroll+1,
-			min(totalLines, m.previewScroll+paneHeight),
-			totalLines,
-		)
-	}
-
-	titleText := fmt.Sprintf("── Task #%d Details: Description (Left) │ Observations (Right)%s", t.ID, scrollHint)
-	barLen := max(0, m.width-len(titleText)-2)
-	headerBar := paneBarHead.Render(titleText) + paneSubStyle.Render(strings.Repeat("─", barLen))
-
-	var sb strings.Builder
-	sb.WriteString(headerBar + "\n")
-
-	leftStyle := lipgloss.NewStyle().Width(leftWidth)
-	rightStyle := lipgloss.NewStyle().Width(rightWidth)
-	sep := paneSubStyle.Render(sepStr)
-
-	endIdx := min(totalLines, m.previewScroll+paneHeight)
-	linesRendered := 0
-	for i := m.previewScroll; i < endIdx; i++ {
-		var lStr, rStr string
-		if i < len(leftLines) {
-			lStr = leftLines[i]
-		}
-		if i < len(rightLines) {
-			rStr = rightLines[i]
-		}
-		row := leftStyle.Render(lStr) + sep + rightStyle.Render(rStr)
-		sb.WriteString(row + "\n")
-		linesRendered++
-	}
-
-	for linesRendered < paneHeight {
-		emptyRow := leftStyle.Render("") + sep + rightStyle.Render("")
-		sb.WriteString(emptyRow + "\n")
-		linesRendered++
-	}
-
-	return sb.String()
 }
 
 func (m Model) helpVisibleHeight() int {
@@ -1545,13 +1347,10 @@ func (m Model) helpContentLines() []string {
 		hKey("  j / k, ↓ / ↑") + hDesc("Navigate rows (tasks)"),
 		hKey("  h / l, ← / →") + hDesc("Select column left / right"),
 		hKey("  gg / G") + hDesc("Jump to first (top) / last (bottom) task"),
+		hKey("  Ctrl+D / Ctrl+U") + hDesc("Scroll list half-page down / up"),
 		hKey("  PgUp / PgDown") + hDesc("Scroll task list by page"),
 		hKey("  Tab / Shift+Tab") + hDesc("Cycle category tabs"),
 		hKey("  1 - 6") + hDesc("Jump directly to category tab"),
-		"",
-		hSec("INSPECTION & SCROLLING"),
-		hKey("  J / K") + hDesc("Scroll task detail pane down / up"),
-		hKey("  Ctrl+D / Ctrl+U") + hDesc("Half-page scroll detail pane down / up"),
 		"",
 		hSec("COLUMN SORTING"),
 		hKey("  s") + hDesc("Sort by selected column (press again to reverse ▲/▼)"),
@@ -1559,16 +1358,16 @@ func (m Model) helpContentLines() []string {
 		hSec("TASK ACTIONS"),
 		hKey("  Enter") + hDesc("Start task (mark in_progress & active)"),
 		hKey("  x") + hDesc("Complete task (mark done)"),
-		hKey("  b") + hDesc("Block task (prompts for blocker reason)"),
+		hKey("  b") + hDesc("Block task (prompts for blocker)"),
 		hKey("  d") + hDesc("Delete task permanently (with confirmation)"),
 		hKey("  a, c") + hDesc("Create new task in $EDITOR"),
-		hKey("  e") + hDesc("Edit task & past observations in $EDITOR"),
+		hKey("  e") + hDesc("Edit task in $EDITOR"),
 		"",
 		hSec("VIM COMMAND MODE (:)"),
 		hKey("  :add <title>") + hDesc("Create new task"),
 		hKey("  :start [id]") + hDesc("Start task (defaults to selected)"),
 		hKey("  :done [id]") + hDesc("Complete task"),
-		hKey("  :block [id] <r>") + hDesc("Block task with reason"),
+		hKey("  :block [id] <r>") + hDesc("Block task with blocker"),
 		hKey("  :log [id] <note>") + hDesc("Append note/observation"),
 		hKey("  :tag [id] +/-tag") + hDesc("Add or remove tags"),
 		hKey("  :dep [id] +/-id") + hDesc("Add or remove dependencies"),

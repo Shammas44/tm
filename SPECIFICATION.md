@@ -171,7 +171,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     priority TEXT NOT NULL CHECK(priority IN ('L', 'M', 'H', 'C')),
     project TEXT DEFAULT '',
     active INTEGER DEFAULT 0,
-    blocker_reason TEXT DEFAULT '',
+    blocker TEXT DEFAULT '',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     completed_at TIMESTAMP

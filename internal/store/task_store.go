@@ -46,7 +46,7 @@ func (s *Store) CreateTask(ctx context.Context, task *model.Task) (*model.Task, 
 	depsJSON, _ := json.Marshal(task.Dependencies)
 
 	query := `
-		INSERT INTO tasks (title, description, status, priority, project, active, blocker_reason, tags, dependencies, created_at, updated_at, completed_at)
+		INSERT INTO tasks (title, description, status, priority, project, active, blocker, tags, dependencies, created_at, updated_at, completed_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	activeInt := 0
@@ -61,7 +61,7 @@ func (s *Store) CreateTask(ctx context.Context, task *model.Task) (*model.Task, 
 		string(task.Priority),
 		task.Project,
 		activeInt,
-		task.BlockerReason,
+		task.Blocker,
 		string(tagsJSON),
 		string(depsJSON),
 		task.CreatedAt.Format(time.RFC3339),
@@ -82,7 +82,7 @@ func (s *Store) CreateTask(ctx context.Context, task *model.Task) (*model.Task, 
 
 func (s *Store) GetTask(ctx context.Context, id int64) (*model.Task, error) {
 	query := `
-		SELECT id, title, description, status, priority, project, active, blocker_reason, tags, dependencies, created_at, updated_at, completed_at
+		SELECT id, title, description, status, priority, project, active, blocker, tags, dependencies, created_at, updated_at, completed_at
 		FROM tasks WHERE id = ?
 	`
 	row := s.db.QueryRowContext(ctx, query, id)
@@ -91,7 +91,7 @@ func (s *Store) GetTask(ctx context.Context, id int64) (*model.Task, error) {
 
 func (s *Store) GetActiveTask(ctx context.Context, project string) (*model.Task, error) {
 	query := `
-		SELECT id, title, description, status, priority, project, active, blocker_reason, tags, dependencies, created_at, updated_at, completed_at
+		SELECT id, title, description, status, priority, project, active, blocker, tags, dependencies, created_at, updated_at, completed_at
 		FROM tasks WHERE active = 1
 	`
 	var args []any
@@ -115,7 +115,7 @@ func (s *Store) SetActiveTask(ctx context.Context, id int64) error {
 
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE tasks
-		SET active = 1, status = ?, blocker_reason = '', updated_at = ?
+		SET active = 1, status = ?, blocker = '', updated_at = ?
 		WHERE id = ?
 	`, string(model.StatusInProgress), now.Format(time.RFC3339), id)
 	if err != nil {
@@ -148,7 +148,7 @@ func (s *Store) UpdateTaskStatus(ctx context.Context, id int64, status model.Tas
 
 	query := `
 		UPDATE tasks
-		SET status = ?, active = ?, blocker_reason = ?, updated_at = ?, completed_at = ?
+		SET status = ?, active = ?, blocker = ?, updated_at = ?, completed_at = ?
 		WHERE id = ?
 	`
 	res, err := s.db.ExecContext(ctx, query,
@@ -199,7 +199,7 @@ func (s *Store) UpdateTask(ctx context.Context, task *model.Task) error {
 
 	query := `
 		UPDATE tasks
-		SET title = ?, description = ?, status = ?, priority = ?, project = ?, active = ?, blocker_reason = ?, tags = ?, dependencies = ?, updated_at = ?, completed_at = ?
+		SET title = ?, description = ?, status = ?, priority = ?, project = ?, active = ?, blocker = ?, tags = ?, dependencies = ?, updated_at = ?, completed_at = ?
 		WHERE id = ?
 	`
 	res, err := s.db.ExecContext(ctx, query,
@@ -209,7 +209,7 @@ func (s *Store) UpdateTask(ctx context.Context, task *model.Task) error {
 		string(task.Priority),
 		task.Project,
 		activeInt,
-		task.BlockerReason,
+		task.Blocker,
 		string(tagsJSON),
 		string(depsJSON),
 		task.UpdatedAt.Format(time.RFC3339),
@@ -280,7 +280,7 @@ func (s *Store) DeleteTaskPermanently(ctx context.Context, id int64) error {
 }
 
 func (s *Store) ListTasks(ctx context.Context, filter TaskFilter) ([]*model.Task, error) {
-	query := `SELECT id, title, description, status, priority, project, active, blocker_reason, tags, dependencies, created_at, updated_at, completed_at FROM tasks WHERE 1=1`
+	query := `SELECT id, title, description, status, priority, project, active, blocker, tags, dependencies, created_at, updated_at, completed_at FROM tasks WHERE 1=1`
 	var args []any
 
 	if !filter.IncludeDeleted {
@@ -347,7 +347,7 @@ func scanTask(row *sql.Row) (*model.Task, error) {
 	var activeInt int
 	var createdAtRaw, updatedAtRaw string
 	var completedAtRaw sql.NullString
-	var desc, blockerReason, project, tagsRaw, depsRaw sql.NullString
+	var desc, blocker, project, tagsRaw, depsRaw sql.NullString
 
 	err := row.Scan(
 		&task.ID,
@@ -357,7 +357,7 @@ func scanTask(row *sql.Row) (*model.Task, error) {
 		&task.Priority,
 		&project,
 		&activeInt,
-		&blockerReason,
+		&blocker,
 		&tagsRaw,
 		&depsRaw,
 		&createdAtRaw,
@@ -374,7 +374,7 @@ func scanTask(row *sql.Row) (*model.Task, error) {
 	task.Description = desc.String
 	task.Project = project.String
 	task.Active = activeInt == 1
-	task.BlockerReason = blockerReason.String
+	task.Blocker = blocker.String
 	if tagsRaw.Valid && tagsRaw.String != "" {
 		_ = json.Unmarshal([]byte(tagsRaw.String), &task.Tags)
 	}
@@ -401,7 +401,7 @@ func scanTaskRow(rows *sql.Rows) (*model.Task, error) {
 	var activeInt int
 	var createdAtRaw, updatedAtRaw string
 	var completedAtRaw sql.NullString
-	var desc, blockerReason, project, tagsRaw, depsRaw sql.NullString
+	var desc, blocker, project, tagsRaw, depsRaw sql.NullString
 
 	err := rows.Scan(
 		&task.ID,
@@ -411,7 +411,7 @@ func scanTaskRow(rows *sql.Rows) (*model.Task, error) {
 		&task.Priority,
 		&project,
 		&activeInt,
-		&blockerReason,
+		&blocker,
 		&tagsRaw,
 		&depsRaw,
 		&createdAtRaw,
@@ -425,7 +425,7 @@ func scanTaskRow(rows *sql.Rows) (*model.Task, error) {
 	task.Description = desc.String
 	task.Project = project.String
 	task.Active = activeInt == 1
-	task.BlockerReason = blockerReason.String
+	task.Blocker = blocker.String
 	if tagsRaw.Valid && tagsRaw.String != "" {
 		_ = json.Unmarshal([]byte(tagsRaw.String), &task.Tags)
 	}

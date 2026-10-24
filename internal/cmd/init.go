@@ -71,7 +71,7 @@ var initCmd = &cobra.Command{
 			Status:  model.StatusBlocked,
 		})
 		for _, bt := range blockedTasks {
-			reason := bt.BlockerReason
+			reason := bt.Blocker
 			if reason == "" {
 				reason = "Blocked"
 			}

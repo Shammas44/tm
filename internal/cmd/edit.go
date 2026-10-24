@@ -22,7 +22,7 @@ var (
 	editDesc        string
 	editTags        string
 	editDeps        string
-	editBlockReason string
+	editBlocker     string
 )
 
 var editCmd = &cobra.Command{
@@ -48,6 +48,7 @@ var editCmd = &cobra.Command{
 			cmd.Flags().Changed("desc") ||
 			cmd.Flags().Changed("tags") ||
 			cmd.Flags().Changed("depends") ||
+			cmd.Flags().Changed("blocker") ||
 			cmd.Flags().Changed("block-reason")
 
 		// 1. Non-interactive flag-based editing
@@ -70,9 +71,9 @@ var editCmd = &cobra.Command{
 			if cmd.Flags().Changed("desc") {
 				task.Description = strings.ReplaceAll(editDesc, "\\n", "\n")
 			}
-			if cmd.Flags().Changed("block-reason") {
-				task.BlockerReason = strings.ReplaceAll(editBlockReason, "\\n", "\n")
-				if strings.TrimSpace(task.BlockerReason) != "" && !cmd.Flags().Changed("status") {
+			if cmd.Flags().Changed("blocker") || cmd.Flags().Changed("block-reason") {
+				task.Blocker = strings.ReplaceAll(editBlocker, "\\n", "\n")
+				if strings.TrimSpace(task.Blocker) != "" && !cmd.Flags().Changed("status") {
 					task.Status = model.StatusBlocked
 				}
 			}
@@ -170,8 +171,8 @@ var editCmd = &cobra.Command{
 		task.Priority = parsed.Priority
 		task.Project = parsed.Project
 		task.Description = parsed.Description
-		task.BlockerReason = parsed.BlockerReason
-		if strings.TrimSpace(task.BlockerReason) != "" {
+		task.Blocker = parsed.Blocker
+		if strings.TrimSpace(task.Blocker) != "" {
 			task.Status = model.StatusBlocked
 		}
 		task.Tags = parsed.Tags
@@ -185,7 +186,9 @@ var editCmd = &cobra.Command{
 		}
 
 		// Observations update/delete
+		origIDs := make(map[int64]bool)
 		for _, o := range obs {
+			origIDs[o.ID] = true
 			if newContent, found := parsed.ExistingNotes[o.ID]; found {
 				trimmedContent := strings.TrimSpace(newContent)
 				if trimmedContent == "" {
@@ -198,14 +201,21 @@ var editCmd = &cobra.Command{
 			}
 		}
 
-		// New Note
+		// Add new observations from parsed.NewNotes or newly added keys in ExistingNotes
 		activeSession, _ := appStore.GetActiveSession(ctx)
 		var sessionID *string
 		if activeSession != nil {
 			sessionID = &activeSession.ID
 		}
-		if strings.TrimSpace(parsed.NewNote) != "" {
-			_, _ = appStore.AddObservation(ctx, sessionID, &task.ID, parsed.NewNote)
+		for id, content := range parsed.ExistingNotes {
+			if !origIDs[id] && strings.TrimSpace(content) != "" {
+				_, _ = appStore.AddObservation(ctx, sessionID, &task.ID, strings.TrimSpace(content))
+			}
+		}
+		for _, newNote := range parsed.NewNotes {
+			if strings.TrimSpace(newNote) != "" {
+				_, _ = appStore.AddObservation(ctx, sessionID, &task.ID, strings.TrimSpace(newNote))
+			}
 		}
 
 		CheckpointActiveSession(ctx, &task.ID, fmt.Sprintf("Updated task #%d: %s", task.ID, task.Title))
@@ -229,7 +239,9 @@ func init() {
 	editCmd.Flags().StringVar(&editDesc, "desc", "", "Task description")
 	editCmd.Flags().StringVar(&editTags, "tags", "", "Comma-separated tags")
 	editCmd.Flags().StringVar(&editDeps, "depends", "", "Comma-separated prerequisite task IDs")
-	editCmd.Flags().StringVar(&editBlockReason, "block-reason", "", "Reason why task is blocked")
+	editCmd.Flags().StringVar(&editBlocker, "blocker", "", "Reason why task is blocked")
+	editCmd.Flags().StringVar(&editBlocker, "block-reason", "", "Alias for --blocker")
+	_ = editCmd.Flags().MarkHidden("block-reason")
 
 	RootCmd.AddCommand(editCmd)
 }

@@ -161,7 +161,7 @@ func TestCLICommandsEndToEnd(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &blocked); err != nil {
 		t.Fatalf("failed to parse JSON from block output: %v (raw: %s)", err, out)
 	}
-	if blocked.Status != model.StatusBlocked || blocked.Active || blocked.BlockerReason != "Need code review approval" {
+	if blocked.Status != model.StatusBlocked || blocked.Active || blocked.Blocker != "Need code review approval" {
 		t.Errorf("unexpected blocked task: %+v", blocked)
 	}
 

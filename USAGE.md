@@ -257,21 +257,21 @@ Fast CLI commands providing full parity with TUI operations:
   Sets status to `in_progress`, marks `active = 1`, and unsets active on all other tasks.
 * **Complete task:** `tm <id> done` (or `tm done <id>`)  
   Sets status to `completed`, sets `completed_at`, unsets active, and records a completion observation.
-* **Block task:** `tm <id> block "<reason>"` (or `tm block <id> "<reason>"`)  
-  Sets status to `blocked`, records blocker reason, and unsets active.
+* **Block task:** `tm <id> block "<blocker>"` (or `tm block <id> "<blocker>"`)  
+  Sets status to `blocked`, records blocker, and unsets active.
 * **Log note:** `tm <id> log "<note>"` (or `tm log <id> "<note>"`)  
   Appends an observation to `<id>`, indexes it into FTS5, and updates the session checkpoint.
 * **Edit task:** `tm edit <id> [flags]` (or `tm <id> edit`)  
-  - Non-interactive flag-based editing: `--title "..."`, `--status <status>`, `--priority <prio>`, `--project <proj>`, `--desc "..."`, `--tags <t1,t2>`, `--depends <d1,d2>`, `--block-reason "..."`.
-  - Interactive editing: When run without modifier flags in a terminal, opens `$EDITOR` with the vit/Taskwarrior template to edit fields and modify/delete past observation notes.
+  - Non-interactive flag-based editing: `--title "..."`, `--status <status>`, `--priority <prio>`, `--project <proj>`, `--desc "..."`, `--tags <t1,t2>`, `--depends <d1,d2>`, `--blocker "..."` (hidden alias: `--block-reason "..."`).
+  - Interactive editing: When run without modifier flags in a terminal, opens `$EDITOR` with the vit/Taskwarrior template to edit fields, update/delete past observation notes, and append new notes under `notes:`.
 * **Tag manipulation:** `tm tag <id> [+tag|-tag...]` (or `tm <id> tag +tag -tag`)  
   Add (`+tag`) or remove (`-tag`) tags on an existing task.
 * **Dependency management:** `tm dep <id> [+depID|-depID...]` (or `tm <id> dep 2`)  
   Add (`+depID`) or remove (`-depID`) prerequisite task dependencies.
 * **Inspect task:** `tm <id>` or `tm show <id>`  
-  Shows complete task details: status, priority, project, user tags, synthetic virtual tags (`READY`, `BLOCKED`, etc.), prerequisite dependencies with their current statuses, blocker reason, description, and full observation history.
-* **Cancel task:** `tm delete <id>` (aliases: `del`, `rm`, `tm <id> del`)  
-  Marks task status as `cancelled`.
+  Shows complete task details: status, priority, project, user tags, synthetic virtual tags (`READY`, `BLOCKED`, etc.), prerequisite dependencies with their current statuses, blocker, description, and full observation history.
+* **Delete task permanently:** `tm delete <id>` (aliases: `del`, `rm`, `tm <id> del`)  
+  Permanently deletes task and associated observations from SQLite (blocked if other tasks depend on it).
 
 ---
 
@@ -322,7 +322,7 @@ Full-screen interactive terminal dashboard built with Bubbletea and Lipgloss wit
 * **Vim-Style Navigation & Keyboard Actions:**
   - `j` / `k` or `Down` / `Up`: Navigate rows down / up
   - `h` / `l` or `Left` / `Right`: Select column left / right
-  - `J` / `K` or `Ctrl+D` / `Ctrl+U`: Scroll task details inspection pane down / up
+  - `Ctrl+D` / `Ctrl+U` or `J` / `K`: Scroll task list half-page down / up
   - `gg`: Jump to top of task list (first task)
   - `G` or `End`: Jump to bottom of task list (last task)
   - `PgUp` / `PgDown`: Scroll task list by page
@@ -333,19 +333,18 @@ Full-screen interactive terminal dashboard built with Bubbletea and Lipgloss wit
   - `e`: **Edit selected task** in `$EDITOR` (or `:edit [id]`)
   - `Enter`: Start task (`in_progress` & `active`)
   - `x`: Mark task completed (`done`)
-  - `b`: Prompt for blocker reason
+  - `b`: Prompt for blocker (automatically sets status to `blocked`)
   - `d`: **Delete task permanently** (prompts for confirmation; blocked if other tasks depend on it)
   - `/`: Enhanced search & filter (`+tag`, `+READY`, `+BLOCKED`, `project:x`, `pri:H`, text)
   - `:`: **Enter Vim Command Mode** (`:add`, `:start`, `:done`, `:block`, `:log`, `:tag`, `:dep`, `:edit`, `:del`, `:q`)
   - `?`: **Open complete full-screen controls & shortcuts help window**
   - `q` or `Ctrl+C`: Exit TUI
 
-* **Dual-Column Readonly Inspection Pane (Left/Right Split):**
-  - The bottom half of the screen is divided into two side-by-side columns:
-    - **Left Column (Description & Prerequisites):** Displays task description and incomplete prerequisite dependencies.
-    - **Right Column (Observations & Blockers):** Displays observations using clean bullet points (`• [date] (#id)`), with any blocker reason prominently featured as the first observation item (`• [BLOCKER] Blocker Reason:`).
-  - Maximizes vertical space with zero empty newline padding.
-  - Scrollable directly with `J` / `K` or `Ctrl+D` / `Ctrl+U`.
+* **Full-Height Task Backlog Layout:**
+  - The task list table utilizes the full terminal screen height, maximizing task density and backlog visibility.
+  - Viewport scrolling smoothly adjusts as you navigate through large lists, with half-page jumps (`Ctrl+D`/`Ctrl+U` or `J`/`K`) and instant top/bottom navigation (`gg`/`G`).
+  - Active tasks are distinguished by `*` (`in_prog*`), with full uppercase status labels (`PENDING`, `IN_PROG*`, `BLOCKED`, `COMPLETED`, `CANCELLED`).
+  - The currently selected row is rendered with a dark blue background bar, and the active column crosshair is highlighted in lighter blue.
 
 * **Command Mode (`:`):**
   - Pressing `:` activates the bottom command prompt:
@@ -353,7 +352,7 @@ Full-screen interactive terminal dashboard built with Bubbletea and Lipgloss wit
     - `:add <title>`: Create a new task
     - `:start [id]`: Start task (defaults to selected task)
     - `:done [id]`: Mark task completed
-    - `:block [id] <reason>`: Block task with reason
+    - `:block [id] <blocker>`: Block task with blocker
     - `:log [id] <note>`: Append observation note to task
     - `:tag [id] +tag -tag`: Add or remove tags
     - `:dep [id] +depID -depID`: Add or remove dependencies
@@ -364,7 +363,7 @@ Full-screen interactive terminal dashboard built with Bubbletea and Lipgloss wit
 #### Editor Integration (`$EDITOR` / YAML-Formatted Editing):
 When pressing `a` (create) or `e` (edit), `tm tui` suspends the terminal and opens `$EDITOR` (or `$VISUAL`, defaulting to `vim` / `nano` / `vi`) with a temporary `.yaml` file for full syntax highlighting.
 
-In edit mode (`e`), the editor displays **read-only task metadata comments** at the top, followed by YAML fields for task attributes, multi-line blocker reason, existing notes, new note, and multi-line description:
+In edit mode (`e`), the editor displays **read-only task metadata comments** at the top, followed by YAML fields for task attributes, multi-line blocker, notes, and multi-line description:
 
 ```yaml
 # ==============================================================================
@@ -376,7 +375,8 @@ In edit mode (`e`), the editor displays **read-only task metadata comments** at 
 # EDITABLE TASK DEFINITION (Save and close editor to commit changes)
 # Valid Statuses: pending, in_progress, blocked, completed, cancelled
 # Valid Priorities: L, M, H, C
-# Multi-line fields (blocker_reason, description, notes): use '|-' format
+# Notes: modify existing IDs, delete lines to remove, or add new keys/notes freely
+# Multi-line fields (blocker, description, notes): use '|-' format
 # ==============================================================================
 
 title: Implement multiplication error handling
@@ -388,16 +388,16 @@ tags:
   - compiler
 depends:
   - 2
-blocker_reason: |-
+blocker: |-
   Waiting on float precision verification.
   Blocked until libm test suite passes.
-new_note: |-
-  Found that IEEE 754 overflow traps can be avoided with flag checks.
 notes:
   1: ASan detects heap-use-after-free in parser line 42
   2: |-
     Completed reproduction unit test in tests/test_parser.c
     Verified fix on Linux kernel 6.8.
+  new: |-
+    Found that IEEE 754 overflow traps can be avoided with flag checks.
 description: |-
   Verify divide-by-zero returns error code and test with ASan.
   Ensure zero-allocation error path.
@@ -406,8 +406,8 @@ description: |-
 Saving and closing the editor immediately updates the task:
 - Modifying the text of a note in the `notes:` map updates the observation in SQLite and the FTS5 search index.
 - Removing an entry from `notes:` deletes that observation.
-- Specifying `blocker_reason:` supports multi-line text (via block scalars `|-`) rendered cleanly in the TUI readonly pane.
-- Specifying `new_note:` records a new observation timestamped to the active session.
+- Adding new keys (e.g. `new:` or any string key) or list entries under `notes:` records new observations timestamped to the active session.
+- Specifying `blocker:` automatically sets the task status to `blocked` if not already set, supporting multi-line text (via YAML block scalars `|-`).
 - Exiting with an empty title cancels the operation.
 
 #### Virtual Tags (Taskwarrior-Style):

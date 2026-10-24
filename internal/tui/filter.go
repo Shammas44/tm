@@ -47,7 +47,7 @@ func MatchesFilter(t *model.Task, allTasks []*model.Task, hasNotes bool, c Filte
 	if c.Text != "" {
 		match := strings.Contains(strings.ToLower(t.Title), c.Text) ||
 			strings.Contains(strings.ToLower(t.Description), c.Text) ||
-			strings.Contains(strings.ToLower(t.BlockerReason), c.Text) ||
+			strings.Contains(strings.ToLower(t.Blocker), c.Text) ||
 			strings.Contains(strings.ToLower(t.Project), c.Text)
 		if !match {
 			return false

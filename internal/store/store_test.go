@@ -81,7 +81,7 @@ func TestTaskCRUDAndStateTransitions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetTask failed: %v", err)
 	}
-	if blocked.Status != model.StatusBlocked || blocked.Active || blocked.BlockerReason != "Waiting on PR" {
+	if blocked.Status != model.StatusBlocked || blocked.Active || blocked.Blocker != "Waiting on PR" {
 		t.Errorf("unexpected blocked task: %+v", blocked)
 	}
 

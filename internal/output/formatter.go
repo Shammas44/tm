@@ -180,8 +180,8 @@ func (f *Formatter) PrintTaskDetails(t *model.Task, allTasks []*model.Task, obs 
 		}
 		fmt.Fprintf(f.Writer, "  Dependencies: %s\n", strings.Join(depStrs, ", "))
 	}
-	if t.BlockerReason != "" {
-		fmt.Fprintf(f.Writer, "  Block Reason: %s\n", blockedStyle.Render(t.BlockerReason))
+	if t.Blocker != "" {
+		fmt.Fprintf(f.Writer, "  Blocker:      %s\n", blockedStyle.Render(t.Blocker))
 	}
 	if t.Description != "" {
 		fmt.Fprintf(f.Writer, "  Description:  %s\n", t.Description)

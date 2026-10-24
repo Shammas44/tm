@@ -16,48 +16,47 @@ type ParsedTask struct {
 	Status        model.TaskStatus
 	Priority      model.TaskPriority
 	Project       string
-	BlockerReason string
+	Blocker       string
 	Tags          []string
 	Dependencies  []int64
 	Description   string
-	NewNote       string
 	ExistingNotes map[int64]string // parsed existing notes (id -> content)
+	NewNotes      []string         // newly added notes
 }
 
 type newTaskYAMLData struct {
-	Title         string   `yaml:"title"`
-	Priority      string   `yaml:"priority"`
-	Project       string   `yaml:"project"`
-	Tags          []string `yaml:"tags"`
-	Depends       []int64  `yaml:"depends"`
-	BlockerReason string   `yaml:"blocker_reason"`
-	NewNote       string   `yaml:"new_note"`
-	Description   string   `yaml:"description"`
+	Title       string   `yaml:"title"`
+	Priority    string   `yaml:"priority"`
+	Project     string   `yaml:"project"`
+	Tags        []string `yaml:"tags"`
+	Depends     []int64  `yaml:"depends"`
+	Blocker     string   `yaml:"blocker"`
+	Notes       []string `yaml:"notes"`
+	Description string   `yaml:"description"`
 }
 
 type editTaskYAMLData struct {
-	Title         string           `yaml:"title"`
-	Status        string           `yaml:"status"`
-	Priority      string           `yaml:"priority"`
-	Project       string           `yaml:"project"`
-	Tags          []string         `yaml:"tags"`
-	Depends       []int64          `yaml:"depends"`
-	BlockerReason string           `yaml:"blocker_reason"`
-	NewNote       string           `yaml:"new_note"`
-	Notes         map[int64]string `yaml:"notes,omitempty"`
-	Description   string           `yaml:"description"`
+	Title       string           `yaml:"title"`
+	Status      string           `yaml:"status"`
+	Priority    string           `yaml:"priority"`
+	Project     string           `yaml:"project"`
+	Tags        []string         `yaml:"tags"`
+	Depends     []int64          `yaml:"depends"`
+	Blocker     string           `yaml:"blocker"`
+	Notes       map[int64]string `yaml:"notes,omitempty"`
+	Description string           `yaml:"description"`
 }
 
 func FormatNewTaskTemplate(defaultProject string) string {
 	data := newTaskYAMLData{
-		Title:         "",
-		Priority:      "M",
-		Project:       defaultProject,
-		Tags:          []string{},
-		Depends:       []int64{},
-		BlockerReason: "",
-		NewNote:       "",
-		Description:   "",
+		Title:       "",
+		Priority:    "M",
+		Project:     defaultProject,
+		Tags:        []string{},
+		Depends:     []int64{},
+		Blocker:     "",
+		Notes:       []string{},
+		Description: "",
 	}
 
 	yamlBytes, _ := yaml.Marshal(&data)
@@ -67,7 +66,8 @@ func FormatNewTaskTemplate(defaultProject string) string {
 	sb.WriteString("# TaskManager: Create New Task (YAML Format)\n")
 	sb.WriteString("# Lines starting with '#' are comments and will be ignored.\n")
 	sb.WriteString("# Valid Priorities: L, M, H, C\n")
-	sb.WriteString("# Multi-line fields (blocker_reason, description): use '|-' followed by indented lines.\n")
+	sb.WriteString("# Multi-line fields (blocker, description, notes): use '|-' format.\n")
+	sb.WriteString("# Notes: add observations freely as list items or key-value entries under 'notes:'\n")
 	sb.WriteString("# Save and close the editor to create the task.\n")
 	sb.WriteString("# ==============================================================================\n\n")
 	sb.Write(yamlBytes)
@@ -106,7 +106,8 @@ func FormatEditTaskTemplate(t *model.Task, allTasks []*model.Task, observations 
 	sb.WriteString("# EDITABLE TASK DEFINITION (Save and close editor to commit changes)\n")
 	sb.WriteString("# Valid Statuses: pending, in_progress, blocked, completed, cancelled\n")
 	sb.WriteString("# Valid Priorities: L, M, H, C\n")
-	sb.WriteString("# Multi-line fields (blocker_reason, description, notes): use '|-' format\n")
+	sb.WriteString("# Notes: modify existing IDs, delete lines to remove, or add new keys/notes freely\n")
+	sb.WriteString("# Multi-line fields (blocker, description, notes): use '|-' format\n")
 	sb.WriteString("# ==============================================================================\n\n")
 
 	notesMap := make(map[int64]string)
@@ -124,16 +125,15 @@ func FormatEditTaskTemplate(t *model.Task, allTasks []*model.Task, observations 
 	}
 
 	data := editTaskYAMLData{
-		Title:         t.Title,
-		Status:        string(t.Status),
-		Priority:      string(t.Priority),
-		Project:       t.Project,
-		Tags:          tags,
-		Depends:       deps,
-		BlockerReason: t.BlockerReason,
-		NewNote:       "",
-		Notes:         notesMap,
-		Description:   t.Description,
+		Title:       t.Title,
+		Status:      string(t.Status),
+		Priority:    string(t.Priority),
+		Project:     t.Project,
+		Tags:        tags,
+		Depends:     deps,
+		Blocker:     t.Blocker,
+		Notes:       notesMap,
+		Description: t.Description,
 	}
 
 	yamlBytes, _ := yaml.Marshal(&data)
@@ -150,21 +150,21 @@ func ParseTaskTemplate(content string) (ParsedTask, error) {
 	res.ExistingNotes = make(map[int64]string)
 
 	type rawYAML struct {
-		Title         string         `yaml:"title"`
-		Status        string         `yaml:"status"`
-		Priority      string         `yaml:"priority"`
-		Project       string         `yaml:"project"`
-		Tags          any            `yaml:"tags"`
-		Depends       any            `yaml:"depends"`
-		BlockerReason string         `yaml:"blocker_reason"`
-		NewNote       string         `yaml:"new_note"`
-		Notes         map[any]string `yaml:"notes"`
-		Description   string         `yaml:"description"`
+		Title         string `yaml:"title"`
+		Status        string `yaml:"status"`
+		Priority      string `yaml:"priority"`
+		Project       string `yaml:"project"`
+		Tags          any    `yaml:"tags"`
+		Depends       any    `yaml:"depends"`
+		Blocker       string `yaml:"blocker"`
+		BlockerReason string `yaml:"blocker_reason"`
+		Notes         any    `yaml:"notes"`
+		Description   string `yaml:"description"`
 	}
 
 	var raw rawYAML
 	err := yaml.Unmarshal([]byte(content), &raw)
-	if err == nil && (raw.Title != "" || raw.Status != "" || raw.Project != "" || len(raw.Notes) > 0 || raw.Description != "") {
+	if err == nil && (raw.Title != "" || raw.Status != "" || raw.Project != "" || raw.Notes != nil || raw.Description != "") {
 		res.Title = strings.TrimSpace(raw.Title)
 		if raw.Status != "" {
 			valLower := strings.ToLower(strings.TrimSpace(raw.Status))
@@ -181,11 +181,13 @@ func ParseTaskTemplate(content string) (ParsedTask, error) {
 			}
 		}
 		res.Project = strings.TrimSpace(raw.Project)
-		res.BlockerReason = strings.TrimSpace(raw.BlockerReason)
-		if res.BlockerReason != "" {
+		res.Blocker = strings.TrimSpace(raw.Blocker)
+		if res.Blocker == "" && raw.BlockerReason != "" {
+			res.Blocker = strings.TrimSpace(raw.BlockerReason)
+		}
+		if res.Blocker != "" {
 			res.Status = model.StatusBlocked
 		}
-		res.NewNote = strings.TrimSpace(raw.NewNote)
 		res.Description = strings.TrimSpace(raw.Description)
 
 		// Parse tags (support list of strings or comma/space separated string)
@@ -247,12 +249,53 @@ func ParseTaskTemplate(content string) (ParsedTask, error) {
 			}
 		}
 
-		// Parse notes
+		// Parse notes (supports map of id -> content, map with custom keys, or slice of notes)
 		if raw.Notes != nil {
-			for k, v := range raw.Notes {
-				kClean := strings.TrimSpace(strings.TrimPrefix(fmt.Sprint(k), "#"))
-				if id, err := strconv.ParseInt(kClean, 10, 64); err == nil {
-					res.ExistingNotes[id] = strings.TrimSpace(v)
+			switch nv := raw.Notes.(type) {
+			case map[string]any:
+				for k, v := range nv {
+					vStr := strings.TrimRight(fmt.Sprint(v), "\r\n")
+					if strings.TrimSpace(vStr) == "" {
+						continue
+					}
+					kClean := strings.TrimSpace(strings.TrimPrefix(k, "#"))
+					if id, err := strconv.ParseInt(kClean, 10, 64); err == nil && id > 0 {
+						res.ExistingNotes[id] = vStr
+					} else {
+						res.NewNotes = append(res.NewNotes, vStr)
+					}
+				}
+			case map[any]any:
+				for k, v := range nv {
+					vStr := strings.TrimRight(fmt.Sprint(v), "\r\n")
+					if strings.TrimSpace(vStr) == "" {
+						continue
+					}
+					kClean := strings.TrimSpace(strings.TrimPrefix(fmt.Sprint(k), "#"))
+					if id, err := strconv.ParseInt(kClean, 10, 64); err == nil && id > 0 {
+						res.ExistingNotes[id] = vStr
+					} else {
+						res.NewNotes = append(res.NewNotes, vStr)
+					}
+				}
+			case []any:
+				for _, item := range nv {
+					vStr := strings.TrimRight(fmt.Sprint(item), "\r\n")
+					if strings.TrimSpace(vStr) != "" {
+						res.NewNotes = append(res.NewNotes, vStr)
+					}
+				}
+			case []string:
+				for _, item := range nv {
+					vStr := strings.TrimRight(item, "\r\n")
+					if strings.TrimSpace(vStr) != "" {
+						res.NewNotes = append(res.NewNotes, vStr)
+					}
+				}
+			case string:
+				vStr := strings.TrimSpace(nv)
+				if vStr != "" {
+					res.NewNotes = append(res.NewNotes, vStr)
 				}
 			}
 		}
@@ -426,15 +469,18 @@ func parseLegacyTaskTemplate(content string) (ParsedTask, error) {
 					}
 				}
 			}
-		case "blocker reason", "blocker", "block_reason":
-			res.BlockerReason = val
-			if strings.TrimSpace(res.BlockerReason) != "" {
+		case "blocker", "blocker reason", "block_reason":
+			res.Blocker = val
+			if strings.TrimSpace(res.Blocker) != "" {
 				res.Status = model.StatusBlocked
 			}
 		}
 	}
 
-	res.NewNote = strings.TrimSpace(strings.Join(newNoteLines, "\n"))
+	newNoteStr := strings.TrimSpace(strings.Join(newNoteLines, "\n"))
+	if newNoteStr != "" {
+		res.NewNotes = append(res.NewNotes, newNoteStr)
+	}
 	res.Description = strings.TrimSpace(strings.Join(descLines, "\n"))
 	return res, nil
 }

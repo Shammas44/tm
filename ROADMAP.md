@@ -71,7 +71,7 @@ This document outlines the sequential implementation plan for rewriting **TaskMa
     * `CreateTask(title, priority, project, description)`
     * `GetTask(id)`
     * `ListTasks(filter)`
-    * `UpdateTaskStatus(id, status, blockerReason)`
+    * `UpdateTaskStatus(id, status, blocker)`
     * `SetActiveTask(id)`
   * `internal/store/observation_store.go`:
     * `AddObservation(sessionID, taskID, content)`

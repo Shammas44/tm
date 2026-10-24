@@ -102,28 +102,17 @@ func TestWrapText(t *testing.T) {
 	}
 }
 
-func TestHalfHeightSplit(t *testing.T) {
+func TestFullScreenAvailableRows(t *testing.T) {
 	m := Model{
 		height: 30,
 		width:  100,
 	}
 
-	halfTop := m.height / 2
-	halfBottom := m.height - halfTop
-
-	// Top half: overhead + availableRows should equal halfTop
-	overhead := m.topSectionOverhead()
+	overhead := m.topSectionOverhead() + 1 // includes bottom spacing/command line
 	avail := m.availableRows()
-	if overhead+avail != halfTop {
-		t.Errorf("expected top section to equal half screen (%d), got overhead (%d) + avail (%d) = %d",
-			halfTop, overhead, avail, overhead+avail)
-	}
-
-	// Bottom half: separator (1) + previewPaneHeight + footer (1) should equal halfBottom
-	paneH := m.previewPaneHeight()
-	if 1+paneH+1 != halfBottom {
-		t.Errorf("expected bottom section to equal half screen (%d), got 1 + paneH (%d) + 1 = %d",
-			halfBottom, paneH, 1+paneH+1)
+	if avail != m.height-overhead {
+		t.Errorf("expected task list to occupy full screen height minus overhead (%d), got %d",
+			m.height-overhead, avail)
 	}
 }
 
@@ -151,63 +140,22 @@ func TestHelpLayoutAndScrolling(t *testing.T) {
 	}
 }
 
-func TestRenderDetailPaneFormat(t *testing.T) {
-	taskID := int64(42)
+func TestStatusUppercase(t *testing.T) {
 	task := &model.Task{
-		ID:            taskID,
-		Title:         "Refactor core",
-		Status:        model.StatusBlocked,
-		BlockerReason: "Waiting on PR #12\nReview pending",
-		Description:   "First line\nSecond line",
-	}
-
-	obs := []*model.Observation{
-		{ID: 1, TaskID: &taskID, Content: "Obs line 1\nObs line 2", CreatedAt: time.Now()},
-		{ID: 2, TaskID: &taskID, Content: "Single line obs", CreatedAt: time.Now()},
+		ID:      42,
+		Title:   "Refactor core",
+		Status:  model.StatusBlocked,
+		Blocker: "Waiting on PR #12",
 	}
 
 	m := Model{
-		height:          30,
-		width:           100,
-		tasks:           []*model.Task{task},
-		allTasks:        []*model.Task{task},
-		selectedTaskObs: obs,
-		cursor:          0,
+		height:   30,
+		width:    100,
+		tasks:    []*model.Task{task},
+		allTasks: []*model.Task{task},
+		cursor:   0,
 	}
 
-	rendered := m.renderDetailPane()
-
-	// Verify two-column split bar
-	if !strings.Contains(rendered, "Description (Left) │ Observations (Right)") {
-		t.Errorf("expected split header, got:\n%s", rendered)
-	}
-
-	// Verify column separator
-	if !strings.Contains(rendered, " │ ") {
-		t.Errorf("expected column separator ' │ ', got:\n%s", rendered)
-	}
-
-	// Verify Description on left
-	if !strings.Contains(rendered, "Description:") || !strings.Contains(rendered, "First line") {
-		t.Errorf("expected Description in pane, got:\n%s", rendered)
-	}
-
-	// Verify Blocker Reason in evidence as first observation with bullet
-	if !strings.Contains(rendered, "• [BLOCKER] Blocker Reason:") || !strings.Contains(rendered, "Waiting on PR #12") {
-		t.Errorf("expected Blocker Reason as first observation, got:\n%s", rendered)
-	}
-
-	// Verify Observation header counts blocker (2 obs + 1 blocker = 3)
-	if !strings.Contains(rendered, "Observation (3 recorded):") {
-		t.Errorf("expected 'Observation (3 recorded):', got:\n%s", rendered)
-	}
-
-	// Verify bullet point '•' for normal observations
-	if !strings.Contains(rendered, "• [") || !strings.Contains(rendered, "(#1)") {
-		t.Errorf("expected bullet '•' for observations, got:\n%s", rendered)
-	}
-
-	// Verify status column uppercase
 	statusText := m.formatStatusText(task)
 	if !strings.Contains(statusText, "BLOCKED") {
 		t.Errorf("expected uppercase status BLOCKED, got: %s", statusText)

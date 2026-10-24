@@ -100,6 +100,9 @@ var (
 	bottomFilterStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("14"))
 
+	bottomSortStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("39"))
+
 	bottomStatusMsgStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("11"))
 
@@ -183,10 +186,11 @@ type Model struct {
 	sessionScrollOffset int // Top visible row index in session table
 	sessionSortOrder    SessionSortOrder
 
-	helpScrollOffset int
-	viewMode         ViewMode
-	searchQuery      string
-	commandInput     string // For Vim command mode ':'
+	helpScrollOffset   int
+	viewMode           ViewMode
+	taskSearchQuery    string
+	sessionSearchQuery string
+	commandInput       string // For Vim command mode ':'
 	blockInput       string
 	statusMsg        string
 	deleteTargetTask *model.Task
@@ -219,6 +223,13 @@ func New(st *store.Store) Model {
 	return m
 }
 
+func (m Model) activeSearchQuery() string {
+	if m.activeTable == TableSessions {
+		return m.sessionSearchQuery
+	}
+	return m.taskSearchQuery
+}
+
 func (m *Model) reloadTasks() {
 	ctx := context.Background()
 	all, err := m.store.ListTasks(ctx, store.TaskFilter{IncludeDeleted: false})
@@ -235,7 +246,7 @@ func (m *Model) reloadTasks() {
 }
 
 func (m *Model) filterTasks() {
-	criteria := ParseSearchQuery(m.searchQuery)
+	criteria := ParseSearchQuery(m.taskSearchQuery)
 	var filtered []*model.Task
 
 	for _, t := range m.allTasks {
@@ -359,7 +370,7 @@ func (m *Model) filterSessions() {
 			}
 		}
 
-		if MatchesSessionFilter(s, m.searchQuery) {
+		if MatchesSessionFilter(s, m.sessionSearchQuery) {
 			filtered = append(filtered, s)
 		}
 	}
@@ -408,7 +419,7 @@ func (m Model) countForSessionTab(tabIdx int) int {
 		case 5: // Handoff
 			match = hasSessionHandoff(s)
 		}
-		if match && MatchesSessionFilter(s, m.searchQuery) {
+		if match && MatchesSessionFilter(s, m.sessionSearchQuery) {
 			cnt++
 		}
 	}
@@ -648,26 +659,40 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.viewMode == ModeSearch {
 			switch msg.String() {
 			case "esc":
-				m.searchQuery = ""
+				if m.activeTable == TableSessions {
+					m.sessionSearchQuery = ""
+					m.filterSessions()
+				} else {
+					m.taskSearchQuery = ""
+					m.filterTasks()
+				}
 				m.viewMode = ModeList
-				m.filterTasks()
-				m.filterSessions()
 				return m, nil
 			case "enter":
 				m.viewMode = ModeList
 				return m, nil
 			case "backspace":
-				if len(m.searchQuery) > 0 {
-					m.searchQuery = m.searchQuery[:len(m.searchQuery)-1]
-					m.filterTasks()
-					m.filterSessions()
+				if m.activeTable == TableSessions {
+					if len(m.sessionSearchQuery) > 0 {
+						m.sessionSearchQuery = m.sessionSearchQuery[:len(m.sessionSearchQuery)-1]
+						m.filterSessions()
+					}
+				} else {
+					if len(m.taskSearchQuery) > 0 {
+						m.taskSearchQuery = m.taskSearchQuery[:len(m.taskSearchQuery)-1]
+						m.filterTasks()
+					}
 				}
 				return m, nil
 			default:
 				if len(msg.String()) == 1 {
-					m.searchQuery += msg.String()
-					m.filterTasks()
-					m.filterSessions()
+					if m.activeTable == TableSessions {
+						m.sessionSearchQuery += msg.String()
+						m.filterSessions()
+					} else {
+						m.taskSearchQuery += msg.String()
+						m.filterTasks()
+					}
 				}
 				return m, nil
 			}
@@ -1085,7 +1110,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "/": // Search
 			m.viewMode = ModeSearch
-			m.searchQuery = ""
 		}
 	}
 
@@ -1513,7 +1537,7 @@ func (m Model) View() string {
 	}
 
 	// 4. Bottom status line (records, filter, command/search prompt)
-	s.WriteString(m.renderBottomStatusLine() + "\n")
+	s.WriteString(m.renderBottomStatusLine())
 
 	return s.String()
 }
@@ -1552,25 +1576,26 @@ func (m Model) renderTopStatusLine() string {
 	leftWidth := lipgloss.Width(left)
 	helpWidth := lipgloss.Width(helpStr)
 
-	if leftWidth+helpWidth >= m.width {
-		return truncate(left+" "+helpStr, m.width)
+	gap := m.width - leftWidth - helpWidth - 1
+	if gap < 1 {
+		return truncate(left+" "+helpStr, m.width-1)
 	}
 
-	gap := m.width - leftWidth - helpWidth
 	return left + strings.Repeat(" ", gap) + helpStr
 }
 
 func (m Model) renderBottomStatusLine() string {
 	switch m.viewMode {
 	case ModeSearch:
-		prompt := searchPromptStyle.Render("/") + m.searchQuery + "█"
+		query := m.activeSearchQuery()
+		prompt := searchPromptStyle.Render("/") + query + "█"
 		hint := bottomHintStyle.Render("Esc: clear • Enter: confirm")
 		pW := lipgloss.Width(prompt)
 		hW := lipgloss.Width(hint)
-		if pW+hW >= m.width {
-			return truncate(prompt, m.width)
+		gap := m.width - pW - hW - 1
+		if gap < 1 {
+			return truncate(prompt, m.width-1)
 		}
-		gap := m.width - pW - hW
 		return prompt + strings.Repeat(" ", gap) + hint
 
 	case ModeCommand:
@@ -1578,10 +1603,10 @@ func (m Model) renderBottomStatusLine() string {
 		hint := bottomHintStyle.Render("Esc: cancel • Enter: run")
 		pW := lipgloss.Width(prompt)
 		hW := lipgloss.Width(hint)
-		if pW+hW >= m.width {
-			return truncate(prompt, m.width)
+		gap := m.width - pW - hW - 1
+		if gap < 1 {
+			return truncate(prompt, m.width-1)
 		}
-		gap := m.width - pW - hW
 		return prompt + strings.Repeat(" ", gap) + hint
 
 	case ModeBlockInput:
@@ -1589,10 +1614,10 @@ func (m Model) renderBottomStatusLine() string {
 		hint := bottomHintStyle.Render("Esc: cancel • Enter: save")
 		pW := lipgloss.Width(prompt)
 		hW := lipgloss.Width(hint)
-		if pW+hW >= m.width {
-			return truncate(prompt, m.width)
+		gap := m.width - pW - hW - 1
+		if gap < 1 {
+			return truncate(prompt, m.width-1)
 		}
-		gap := m.width - pW - hW
 		return prompt + strings.Repeat(" ", gap) + hint
 
 	case ModeDeleteConfirm:
@@ -1601,40 +1626,51 @@ func (m Model) renderBottomStatusLine() string {
 			hint := bottomHintStyle.Render("y: confirm • n/Esc: cancel")
 			pW := lipgloss.Width(prompt)
 			hW := lipgloss.Width(hint)
-			if pW+hW >= m.width {
-				return truncate(prompt, m.width)
+			gap := m.width - pW - hW - 1
+			if gap < 1 {
+				return truncate(prompt, m.width-1)
 			}
-			gap := m.width - pW - hW
 			return prompt + strings.Repeat(" ", gap) + hint
 		}
 	}
 
-	// Normal list mode
+	// Normal list mode: panel-specific records, filter, and sort order
 	var recordsStr string
+	var filterStr string
+	var sortStr string
+
 	if m.activeTable == TableTasks {
 		if len(m.tasks) == len(m.allTasks) {
 			recordsStr = fmt.Sprintf("Records: %d", len(m.tasks))
 		} else {
 			recordsStr = fmt.Sprintf("Records: %d of %d", len(m.tasks), len(m.allTasks))
 		}
+		if m.taskSearchQuery == "" {
+			filterStr = "Filter: None"
+		} else {
+			filterStr = fmt.Sprintf("Filter: '%s'", m.taskSearchQuery)
+		}
+		sortStr = "Sort: " + m.sortOrder.Label()
 	} else {
 		if len(m.sessions) == len(m.allSessions) {
 			recordsStr = fmt.Sprintf("Records: %d", len(m.sessions))
 		} else {
 			recordsStr = fmt.Sprintf("Records: %d of %d", len(m.sessions), len(m.allSessions))
 		}
-	}
-
-	filterStr := "Filter: None"
-	if m.searchQuery != "" {
-		filterStr = fmt.Sprintf("Filter: '%s'", m.searchQuery)
+		if m.sessionSearchQuery == "" {
+			filterStr = "Filter: None"
+		} else {
+			filterStr = fmt.Sprintf("Filter: '%s'", m.sessionSearchQuery)
+		}
+		sortStr = "Sort: " + m.sessionSortOrder.Label()
 	}
 
 	recStyled := bottomRecordsStyle.Render(recordsStr)
 	fltStyled := bottomFilterStyle.Render(filterStr)
+	sortStyled := bottomSortStyle.Render(sortStr)
 	sep := topSepStyle.Render("│")
 
-	left := fmt.Sprintf("%s %s %s", recStyled, sep, fltStyled)
+	left := fmt.Sprintf("%s %s %s %s %s", recStyled, sep, fltStyled, sep, sortStyled)
 	if m.statusMsg != "" {
 		left += " " + sep + " " + bottomStatusMsgStyle.Render(m.statusMsg)
 	}
@@ -1643,11 +1679,11 @@ func (m Model) renderBottomStatusLine() string {
 	leftW := lipgloss.Width(left)
 	hintW := lipgloss.Width(hint)
 
-	if leftW+hintW >= m.width {
-		return truncate(left, m.width)
+	gap := m.width - leftW - hintW - 1
+	if gap < 1 {
+		return truncate(left, m.width-1)
 	}
 
-	gap := m.width - leftW - hintW
 	return left + strings.Repeat(" ", gap) + hint
 }
 
@@ -2088,7 +2124,7 @@ func (m Model) renderFullScreenHelp() string {
 }
 
 func (m Model) countForTab(tabIdx int) int {
-	criteria := ParseSearchQuery(m.searchQuery)
+	criteria := ParseSearchQuery(m.taskSearchQuery)
 	cnt := 0
 	for _, t := range m.allTasks {
 		vtags := model.ComputeVirtualTags(t, m.allTasks, false)

@@ -238,6 +238,22 @@ func TestTopAndBottomStatusLines(t *testing.T) {
 	}
 
 	// 1. Top status line checks
+	view := m.View()
+	lines := strings.Split(view, "\n")
+	if len(lines) != m.height {
+		t.Fatalf("expected view to have exactly %d lines matching screen height, got %d", m.height, len(lines))
+	}
+
+	// Verify line 0 is the top status line (guaranteed visible at top of terminal)
+	if !strings.Contains(lines[0], AppName) || !strings.Contains(lines[0], Version) {
+		t.Errorf("expected line 0 to be top status line, got: %s", lines[0])
+	}
+
+	// Verify the last line is the bottom status line (guaranteed visible at bottom of terminal)
+	if !strings.Contains(lines[len(lines)-1], "Records:") {
+		t.Errorf("expected last line to be bottom status line, got: %s", lines[len(lines)-1])
+	}
+
 	top := m.renderTopStatusLine()
 	if !strings.Contains(top, AppName) {
 		t.Errorf("expected top line to contain app name '%s', got: %s", AppName, top)
@@ -263,16 +279,42 @@ func TestTopAndBottomStatusLines(t *testing.T) {
 	if !strings.Contains(bottom, "Filter: None") {
 		t.Errorf("expected bottom line to contain 'Filter: None', got: %s", bottom)
 	}
-
-	// 3. Bottom status line in ModeSearch
-	m.viewMode = ModeSearch
-	m.searchQuery = "unit"
-	bottomSearch := m.renderBottomStatusLine()
-	if !strings.Contains(bottomSearch, "/unit█") {
-		t.Errorf("expected bottom line in search mode to show '/unit█', got: %s", bottomSearch)
+	if !strings.Contains(bottom, "Sort:") {
+		t.Errorf("expected bottom line to contain 'Sort:', got: %s", bottom)
 	}
 
-	// 4. Bottom status line in ModeCommand
+	// 3. Panel-specific filter & sort order on Sessions table
+	m.activeTable = TableSessions
+	m.sessionSortOrder = SessionSortOrder{Field: SessionSortByDuration, Ascending: false}
+	m.sessionSearchQuery = "claude"
+	bottomSess := m.renderBottomStatusLine()
+	if !strings.Contains(bottomSess, "Filter: 'claude'") {
+		t.Errorf("expected bottom line on sessions to show 'Filter: 'claude'', got: %s", bottomSess)
+	}
+	if !strings.Contains(bottomSess, "Sort: Duration ▼") {
+		t.Errorf("expected bottom line on sessions to show 'Sort: Duration ▼', got: %s", bottomSess)
+	}
+
+	// Switch back to Tasks table and verify task-specific filter & sort are retained
+	m.activeTable = TableTasks
+	m.taskSearchQuery = "backend"
+	m.sortOrder = SortOrder{Field: SortByPriority, Ascending: true}
+	bottomTask := m.renderBottomStatusLine()
+	if !strings.Contains(bottomTask, "Filter: 'backend'") {
+		t.Errorf("expected bottom line on tasks to show 'Filter: 'backend'', got: %s", bottomTask)
+	}
+	if !strings.Contains(bottomTask, "Sort: Pri ▲") {
+		t.Errorf("expected bottom line on tasks to show 'Sort: Pri ▲', got: %s", bottomTask)
+	}
+
+	// 4. Bottom status line in ModeSearch
+	m.viewMode = ModeSearch
+	bottomSearch := m.renderBottomStatusLine()
+	if !strings.Contains(bottomSearch, "/backend█") {
+		t.Errorf("expected bottom line in search mode to show '/backend█', got: %s", bottomSearch)
+	}
+
+	// 5. Bottom status line in ModeCommand
 	m.viewMode = ModeCommand
 	m.commandInput = "start 1"
 	bottomCmd := m.renderBottomStatusLine()
@@ -280,7 +322,7 @@ func TestTopAndBottomStatusLines(t *testing.T) {
 		t.Errorf("expected bottom line in command mode to show ':start 1█', got: %s", bottomCmd)
 	}
 
-	// 5. Task status formatting has no '*'
+	// 6. Task status formatting has no '*'
 	statusText := m.formatStatusText(task)
 	if strings.Contains(statusText, "*") {
 		t.Errorf("expected status text to NOT contain asterisk '*', got: %s", statusText)

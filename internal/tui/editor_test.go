@@ -107,3 +107,43 @@ func TestParseEditTaskTemplateWithObservations(t *testing.T) {
 		t.Errorf("expected new note, got '%s'", parsed.NewNote)
 	}
 }
+
+func TestParseMultiLineObservations(t *testing.T) {
+	input := `Title: Memory leak diagnosis
+Status: in_progress
+Priority: H
+
+Note 1: Initial leak detected
+  Valgrind reported 64 bytes in slab_alloc
+  Fixed by adding free call in pool_release()
+
+Note 2: Second single-line observation
+
+New Note:
+First line of multi-line note
+Second line of multi-line note
+Third line of multi-line note
+
+Description:
+This is the description.
+`
+
+	parsed, err := ParseTaskTemplate(input)
+	if err != nil {
+		t.Fatalf("ParseTaskTemplate failed: %v", err)
+	}
+
+	expectedNote1 := "Initial leak detected\nValgrind reported 64 bytes in slab_alloc\nFixed by adding free call in pool_release()"
+	if parsed.ExistingNotes[1] != expectedNote1 {
+		t.Errorf("expected multi-line note 1 to be:\n%q\ngot:\n%q", expectedNote1, parsed.ExistingNotes[1])
+	}
+
+	expectedNewNote := "First line of multi-line note\nSecond line of multi-line note\nThird line of multi-line note"
+	if parsed.NewNote != expectedNewNote {
+		t.Errorf("expected multi-line new note to be:\n%q\ngot:\n%q", expectedNewNote, parsed.NewNote)
+	}
+
+	if parsed.Description != "This is the description." {
+		t.Errorf("expected description 'This is the description.', got '%s'", parsed.Description)
+	}
+}

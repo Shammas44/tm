@@ -148,6 +148,7 @@ var logCmd = &cobra.Command{
 		}
 
 		note := strings.Join(args[1:], " ")
+		note = strings.ReplaceAll(note, "\\n", "\n")
 
 		activeSession, _ := appStore.GetActiveSession(ctx)
 		var sessionID *string

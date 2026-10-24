@@ -31,19 +31,25 @@ var (
 			Bold(true).
 			Foreground(lipgloss.Color("12"))
 
+	rowBlueBg    = lipgloss.Color("25") // Royal Blue for selected row
+	colLighterBg = lipgloss.Color("33") // Lighter Blue for selected column
+
 	headerSelectedColStyle = lipgloss.NewStyle().
 				Bold(true).
 				Foreground(lipgloss.Color("255")).
-				Background(lipgloss.Color("33")) // Lighter blue for selected column header
+				Background(colLighterBg)
 
-	selectedRowStyle = lipgloss.NewStyle().
+	selectedRowCellStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("255")).
-				Background(lipgloss.Color("25")) // Blue for the complete selected row
+				Background(rowBlueBg)
 
-	selectedCellStyle = lipgloss.NewStyle().
+	selectedColCellStyle = lipgloss.NewStyle().
 				Bold(true).
 				Foreground(lipgloss.Color("255")).
-				Background(lipgloss.Color("33")) // Lighter blue for selected column cell in selected row
+				Background(colLighterBg)
+
+	selectedGapStyle = lipgloss.NewStyle().
+				Background(rowBlueBg)
 
 	inProgressStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Bold(true)
 	completedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
@@ -1136,16 +1142,40 @@ func (m Model) View() string {
 			createdStr := t.CreatedAt.Local().Format("2006-01-02 15:04")
 			titleStr := truncate(t.Title, titleWidth)
 
-			cells := []string{
-				strconv.FormatInt(t.ID, 10),
-				statusStr,
-				prioStr,
-				projectStr,
-				tagsStr,
-				depsStr,
-				notesStr,
-				createdStr,
-				titleStr,
+			rawStatus := string(t.Status)
+			if t.Active {
+				rawStatus = "in_prog*"
+			}
+			rawPrio := string(t.Priority)
+			if rawPrio == "" {
+				rawPrio = "M"
+			}
+
+			var cells []string
+			if isRowSelected {
+				cells = []string{
+					strconv.FormatInt(t.ID, 10),
+					rawStatus,
+					rawPrio,
+					projectStr,
+					tagsStr,
+					depsStr,
+					notesStr,
+					createdStr,
+					titleStr,
+				}
+			} else {
+				cells = []string{
+					strconv.FormatInt(t.ID, 10),
+					statusStr,
+					prioStr,
+					projectStr,
+					tagsStr,
+					depsStr,
+					notesStr,
+					createdStr,
+					titleStr,
+				}
 			}
 			widths := []int{
 				colIDWidth,
@@ -1160,24 +1190,28 @@ func (m Model) View() string {
 			}
 
 			var renderedCells []string
-			renderedCells = append(renderedCells, lipgloss.NewStyle().Width(colMarkWidth).Render(cursorMark))
-
-			for colIdx := 0; colIdx < TotalColumns; colIdx++ {
-				cellVal := cells[colIdx]
-				w := widths[colIdx]
-
-				// Requirement 1: Visually select line and column intersection
-				if isRowSelected && colIdx == m.selectedCol {
-					renderedCells = append(renderedCells, selectedCellStyle.Width(w).Render(cellVal))
-				} else {
+			if isRowSelected {
+				renderedCells = append(renderedCells, selectedRowCellStyle.Width(colMarkWidth).Render(cursorMark))
+				for colIdx := 0; colIdx < TotalColumns; colIdx++ {
+					cellVal := cells[colIdx]
+					w := widths[colIdx]
+					if colIdx == m.selectedCol {
+						renderedCells = append(renderedCells, selectedColCellStyle.Width(w).Render(cellVal))
+					} else {
+						renderedCells = append(renderedCells, selectedRowCellStyle.Width(w).Render(cellVal))
+					}
+				}
+				gap := selectedGapStyle.Render(colGap)
+				rowLine := strings.Join(renderedCells, gap)
+				s.WriteString(rowLine + "\n")
+			} else {
+				renderedCells = append(renderedCells, lipgloss.NewStyle().Width(colMarkWidth).Render(cursorMark))
+				for colIdx := 0; colIdx < TotalColumns; colIdx++ {
+					cellVal := cells[colIdx]
+					w := widths[colIdx]
 					renderedCells = append(renderedCells, lipgloss.NewStyle().Width(w).Render(cellVal))
 				}
-			}
-
-			rowLine := strings.Join(renderedCells, colGap)
-			if isRowSelected {
-				s.WriteString(selectedRowStyle.Render(rowLine) + "\n")
-			} else {
+				rowLine := strings.Join(renderedCells, colGap)
 				s.WriteString(rowLine + "\n")
 			}
 		}
@@ -1264,13 +1298,17 @@ func (m Model) renderDetailPane() string {
 			allLines = append(allLines, "")
 		}
 		allLines = append(allLines, paneBarHead.Render(fmt.Sprintf("  Observations (%d recorded):", len(m.selectedTaskObs))))
-		for _, o := range m.selectedTaskObs {
+		for obsIdx, o := range m.selectedTaskObs {
+			if obsIdx > 0 {
+				allLines = append(allLines, "") // separator between distinct observations
+			}
 			headerPrefix := fmt.Sprintf("  • [%s] (#%d) ", o.CreatedAt.Local().Format("2006-01-02 15:04"), o.ID)
 			subIndent := "      "
 			contentLines := strings.Split(strings.TrimSpace(o.Content), "\n")
 			for lineIdx, rawLine := range contentLines {
 				rawLine = strings.TrimSpace(rawLine)
 				if rawLine == "" {
+					allLines = append(allLines, "")
 					continue
 				}
 				if lineIdx == 0 {
@@ -1495,12 +1533,12 @@ func wrapText(text string, width int, indent string) []string {
 	for scanner.Scan() {
 		rawLine := scanner.Text()
 		if len(rawLine) == 0 {
-			result = append(result, indent)
+			result = append(result, "")
 			continue
 		}
 		words := strings.Fields(rawLine)
 		if len(words) == 0 {
-			result = append(result, indent)
+			result = append(result, "")
 			continue
 		}
 		var curLine strings.Builder

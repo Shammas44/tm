@@ -103,10 +103,18 @@ func FormatEditTaskTemplate(t *model.Task, allTasks []*model.Task, observations 
 	sb.WriteString(fmt.Sprintf("# Total recorded: %d\n", len(observations)))
 	sb.WriteString("# ==============================================================================\n")
 	for _, o := range observations {
-		sb.WriteString(fmt.Sprintf("Note %d: %s\n", o.ID, o.Content))
+		contentTrimmed := strings.TrimSpace(o.Content)
+		lines := strings.Split(contentTrimmed, "\n")
+		if len(lines) == 0 {
+			continue
+		}
+		sb.WriteString(fmt.Sprintf("Note %d: %s\n", o.ID, lines[0]))
+		for _, subLine := range lines[1:] {
+			sb.WriteString(fmt.Sprintf("  %s\n", subLine))
+		}
 	}
 	sb.WriteString("\n")
-	sb.WriteString("# Add a new observation/note to task history upon saving:\n")
+	sb.WriteString("# Add a new observation/note to task history upon saving (multi-line supported):\n")
 	sb.WriteString("New Note: \n")
 	sb.WriteString("\n")
 	sb.WriteString("# Everything below 'Description:' will be treated as the task description.\n")
@@ -129,19 +137,25 @@ func ParseTaskTemplate(content string) (ParsedTask, error) {
 	res.ExistingNotes = make(map[int64]string)
 
 	scanner := bufio.NewScanner(strings.NewReader(content))
-	inDescription := false
+
+	type parseState int
+	const (
+		stateHeader parseState = iota
+		stateInNote
+		stateInNewNote
+		stateInDescription
+	)
+
+	curState := stateHeader
+	currentNoteID := int64(0)
+	var newNoteLines []string
 	var descLines []string
 
 	for scanner.Scan() {
 		line := scanner.Text()
 		trimmed := strings.TrimSpace(line)
 
-		// Comments outside description are ignored
-		if !inDescription && strings.HasPrefix(trimmed, "#") {
-			continue
-		}
-
-		if inDescription {
+		if curState == stateInDescription {
 			if strings.HasPrefix(trimmed, "#") && len(descLines) == 0 {
 				continue
 			}
@@ -149,10 +163,91 @@ func ParseTaskTemplate(content string) (ParsedTask, error) {
 			continue
 		}
 
-		if trimmed == "" {
+		// Comment lines outside description
+		if strings.HasPrefix(trimmed, "#") {
+			if curState == stateInNewNote || curState == stateInNote {
+				curState = stateHeader
+				currentNoteID = 0
+			}
 			continue
 		}
 
+		if trimmed == "" {
+			if curState == stateInNote {
+				curState = stateHeader
+				currentNoteID = 0
+			} else if curState == stateInNewNote {
+				newNoteLines = append(newNoteLines, "")
+			}
+			continue
+		}
+
+		// Check if line enters Description:
+		if strings.EqualFold(trimmed, "description:") || strings.HasPrefix(strings.ToLower(trimmed), "description:") {
+			curState = stateInDescription
+			currentNoteID = 0
+			afterColon := strings.TrimSpace(line[strings.Index(line, ":")+1:])
+			if afterColon != "" {
+				descLines = append(descLines, afterColon)
+			}
+			continue
+		}
+
+		// Check if line starts New Note: or New Observation:
+		if strings.HasPrefix(strings.ToLower(trimmed), "new note:") || strings.HasPrefix(strings.ToLower(trimmed), "new observation:") {
+			curState = stateInNewNote
+			currentNoteID = 0
+			colonIdx := strings.Index(line, ":")
+			afterColon := strings.TrimSpace(line[colonIdx+1:])
+			if afterColon != "" {
+				newNoteLines = append(newNoteLines, afterColon)
+			}
+			continue
+		}
+
+		// Check if line starts Note <id>: or Observation <id>:
+		lower := strings.ToLower(trimmed)
+		if (strings.HasPrefix(lower, "note ") || strings.HasPrefix(lower, "observation ")) && strings.Contains(line, ":") {
+			colonIdx := strings.Index(line, ":")
+			key := strings.TrimSpace(line[:colonIdx])
+			val := strings.TrimSpace(line[colonIdx+1:])
+			fields := strings.Fields(key)
+			if len(fields) >= 2 {
+				if id, err := strconv.ParseInt(fields[1], 10, 64); err == nil {
+					curState = stateInNote
+					currentNoteID = id
+					res.ExistingNotes[id] = val
+					continue
+				}
+			}
+		}
+
+		// Check if continuation line of current existing note
+		if curState == stateInNote && currentNoteID > 0 {
+			if strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t") || !strings.Contains(line, ":") {
+				if res.ExistingNotes[currentNoteID] == "" {
+					res.ExistingNotes[currentNoteID] = trimmed
+				} else {
+					res.ExistingNotes[currentNoteID] += "\n" + trimmed
+				}
+				continue
+			} else {
+				curState = stateHeader
+				currentNoteID = 0
+			}
+		}
+
+		// Check if continuation line of New Note:
+		if curState == stateInNewNote {
+			if strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t") || !strings.Contains(line, ":") {
+				newNoteLines = append(newNoteLines, trimmed)
+				continue
+			} else {
+				curState = stateHeader
+			}
+		}
+
+		// Key-Value field parsing
 		colonIdx := strings.Index(line, ":")
 		if colonIdx == -1 {
 			continue
@@ -160,17 +255,6 @@ func ParseTaskTemplate(content string) (ParsedTask, error) {
 
 		key := strings.ToLower(strings.TrimSpace(line[:colonIdx]))
 		val := strings.TrimSpace(line[colonIdx+1:])
-
-		// Check for "note <id>" or "observation <id>"
-		if strings.HasPrefix(key, "note ") || strings.HasPrefix(key, "observation ") {
-			fields := strings.Fields(key)
-			if len(fields) >= 2 {
-				if id, err := strconv.ParseInt(fields[1], 10, 64); err == nil {
-					res.ExistingNotes[id] = val
-					continue
-				}
-			}
-		}
 
 		switch key {
 		case "title":
@@ -217,16 +301,10 @@ func ParseTaskTemplate(content string) (ParsedTask, error) {
 			}
 		case "blocker reason", "blocker", "block_reason":
 			res.BlockerReason = val
-		case "new note", "new observation":
-			res.NewNote = val
-		case "description":
-			inDescription = true
-			if val != "" {
-				descLines = append(descLines, val)
-			}
 		}
 	}
 
+	res.NewNote = strings.TrimSpace(strings.Join(newNoteLines, "\n"))
 	res.Description = strings.TrimSpace(strings.Join(descLines, "\n"))
 	return res, nil
 }

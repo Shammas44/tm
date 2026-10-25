@@ -49,3 +49,7 @@ bin/
 /tm
 *.exe
 
+# Sandboxed Agent Demos (never commit)
+rust-sandcastle-demo/
+
+

@@ -6,8 +6,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-TM_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+TM_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 IMAGE_NAME="${IMAGE_NAME:-sandcastle:claude-dev}"
 
 echo "=================================================================="
@@ -28,8 +27,8 @@ else
     echo ""
     echo "Options:"
     echo "  1) Launch an interactive agent session first:"
-    echo "       cd ${PROJECT_DIR}"
-    echo "       tsx --tsconfig=.sandcastle/tsconfig.json .sandcastle/interactive.ts"
+    echo "       cd ${SCRIPT_DIR}"
+    echo "       tsx interactive.ts"
     echo ""
     echo "  2) Or launch a standalone interactive debugging shell right now:"
     read -r -p "     Launch temporary debug container? [y/N]: " CONFIRM

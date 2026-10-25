@@ -6,8 +6,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-TM_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+TM_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 IMAGE_NAME="${IMAGE_NAME:-sandcastle:agy-dev}"
 DOCKERFILE="${SCRIPT_DIR}/Dockerfile"
 TM_LINUX_BIN="${TM_ROOT}/bin/tm-linux-amd64"
@@ -37,22 +36,22 @@ AGENT_GID="$(id -g)"
 echo "==> Host User Mapping: UID=${AGENT_UID}, GID=${AGENT_GID}"
 echo "==> Dockerfile: ${DOCKERFILE}"
 
-# 3. Build Docker Image (build context is the project root)
+# 3. Build Docker Image
 docker build \
     --tag "${IMAGE_NAME}" \
     --build-arg AGENT_UID="${AGENT_UID}" \
     --build-arg AGENT_GID="${AGENT_GID}" \
     --file "${DOCKERFILE}" \
-    "${PROJECT_DIR}"
+    "${SCRIPT_DIR}"
 
 echo ""
 echo "=================================================================="
 echo " Sandbox image ready: ${IMAGE_NAME}"
 echo "=================================================================="
 echo "Run interactive agent session:"
-echo "  cd ${PROJECT_DIR}"
-echo "  tsx --tsconfig=.sandcastle/tsconfig.json .sandcastle/interactive.ts"
+echo "  cd ${SCRIPT_DIR}"
+echo "  tsx interactive.ts"
 echo ""
 echo "Open a shell in a running container:"
-echo "  ./.sandcastle/shell.sh"
+echo "  ./shell.sh"
 echo "=================================================================="

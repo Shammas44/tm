@@ -3,6 +3,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "interactive": "tsx --tsconfig=.sandcastle/tsconfig.json .sandcastle/interactive.ts"
+    "interactive": "tsx interactive.ts"
   }
 }

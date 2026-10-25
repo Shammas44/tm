@@ -49,15 +49,15 @@ async function main() {
   if (isInsideContainer) {
     sandboxProvider = noSandbox();
   } else {
-    const projectRootDir = resolve(currentDir, "..");
+    const projectRootDir = currentDir;
     const hostProjectDir = join(homedir(), ".taskmanager", "projects", projectSlug);
     const hostClaudeConfig = join(homedir(), ".claude.json");
 
     // Locate static TaskManager Linux binary
     const candidatePaths = [
       process.env.TM_BINARY_PATH,
-      resolve(currentDir, "../../../bin/tm-linux-amd64"),
       resolve(currentDir, "../../bin/tm-linux-amd64"),
+      resolve(currentDir, "../../../bin/tm-linux-amd64"),
       join(homedir(), ".local/bin/tm-linux-amd64"),
     ].filter(Boolean) as string[];
 

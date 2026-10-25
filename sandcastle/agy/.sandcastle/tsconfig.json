@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "node",
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "typeRoots": [
+      "/usr/local/opt/node/lib/node_modules/@types",
+      "/usr/local/Cellar/node/25.2.1/lib/node_modules/@types"
+    ],
+    "paths": {
+      "@ai-hero/sandcastle": [
+        "/usr/local/opt/node/lib/node_modules/@ai-hero/sandcastle/dist/index",
+        "/usr/local/Cellar/node/25.2.1/lib/node_modules/@ai-hero/sandcastle/dist/index"
+      ],
+      "@ai-hero/sandcastle/*": [
+        "/usr/local/opt/node/lib/node_modules/@ai-hero/sandcastle/dist/*",
+        "/usr/local/Cellar/node/25.2.1/lib/node_modules/@ai-hero/sandcastle/dist/*"
+      ]
+    }
+  }
+}

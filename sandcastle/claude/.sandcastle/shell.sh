@@ -6,8 +6,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TM_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-IMAGE_NAME="${IMAGE_NAME:-sandcastle:agy-dev}"
+PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+TM_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+IMAGE_NAME="${IMAGE_NAME:-sandcastle:claude-dev}"
 
 echo "=================================================================="
 echo " Looking for running Sandcastle container (${IMAGE_NAME})..."
@@ -27,7 +28,7 @@ else
     echo ""
     echo "Options:"
     echo "  1) Launch an interactive agent session first:"
-    echo "       cd ${SCRIPT_DIR}"
+    echo "       cd ${PROJECT_DIR}"
     echo "       tsx --tsconfig=.sandcastle/tsconfig.json .sandcastle/interactive.ts"
     echo ""
     echo "  2) Or launch a standalone interactive debugging shell right now:"

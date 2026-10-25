@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Build Script: Sandcastle Claude Code Sandbox Image
+# Build Script: Sandcastle Antigravity CLI Sandbox Image
 # ==============================================================================
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TM_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-IMAGE_NAME="${IMAGE_NAME:-sandcastle:claude-dev}"
-DOCKERFILE="${SCRIPT_DIR}/.sandcastle/Dockerfile"
+PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+TM_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+IMAGE_NAME="${IMAGE_NAME:-sandcastle:agy-dev}"
+DOCKERFILE="${SCRIPT_DIR}/Dockerfile"
 TM_LINUX_BIN="${TM_ROOT}/bin/tm-linux-amd64"
 
 echo "=================================================================="
@@ -36,22 +37,22 @@ AGENT_GID="$(id -g)"
 echo "==> Host User Mapping: UID=${AGENT_UID}, GID=${AGENT_GID}"
 echo "==> Dockerfile: ${DOCKERFILE}"
 
-# 3. Build Docker Image
+# 3. Build Docker Image (build context is the project root)
 docker build \
     --tag "${IMAGE_NAME}" \
     --build-arg AGENT_UID="${AGENT_UID}" \
     --build-arg AGENT_GID="${AGENT_GID}" \
     --file "${DOCKERFILE}" \
-    "${SCRIPT_DIR}"
+    "${PROJECT_DIR}"
 
 echo ""
 echo "=================================================================="
 echo " Sandbox image ready: ${IMAGE_NAME}"
 echo "=================================================================="
 echo "Run interactive agent session:"
-echo "  cd ${SCRIPT_DIR}"
+echo "  cd ${PROJECT_DIR}"
 echo "  tsx --tsconfig=.sandcastle/tsconfig.json .sandcastle/interactive.ts"
 echo ""
 echo "Open a shell in a running container:"
-echo "  ./shell.sh"
+echo "  ./.sandcastle/shell.sh"
 echo "=================================================================="

@@ -42,17 +42,17 @@ This directory provides two ready-to-use, **language-agnostic** templates demons
 
 ## Template Structure
 
-Each template folder contains strictly `.sandcastle`-related files and tooling scripts:
+Each template folder contains strictly `.sandcastle` configuration and helper scripts:
 
 ```text
 sandcastle/<agy|claude>/
-├── .sandcastle/
-│   ├── Dockerfile         # Language-agnostic container definition
-│   ├── interactive.ts     # Worktree + project-scoped interactive session runner
-│   ├── package.json       # Script definitions
-│   └── tsconfig.json      # TypeScript module resolution (uses global Sandcastle)
-├── build-image.sh         # Rebuilds the Docker image with host UID/GID
-└── shell.sh               # Attaches a bash shell into the running container
+└── .sandcastle/
+    ├── Dockerfile         # Language-agnostic container definition
+    ├── interactive.ts     # Worktree + project-scoped interactive session runner
+    ├── build-image.sh     # Rebuilds the Docker image with host UID/GID
+    ├── shell.sh           # Attaches a bash shell into the running container
+    ├── package.json       # Script definitions
+    └── tsconfig.json      # TypeScript module resolution (uses global Sandcastle)
 ```
 
 ---
@@ -75,13 +75,13 @@ make build-linux
 cd sandcastle/agy
 
 # 1. Build the Docker image
-./build-image.sh
+./.sandcastle/build-image.sh
 
 # 2. Launch the interactive session (starts at home screen, project-scoped)
 tsx --tsconfig=.sandcastle/tsconfig.json .sandcastle/interactive.ts
 
 # 3. (In a separate terminal) Open a shell inside the running container
-./shell.sh
+./.sandcastle/shell.sh
 ```
 
 #### For Claude Code (`claude`):
@@ -90,13 +90,13 @@ tsx --tsconfig=.sandcastle/tsconfig.json .sandcastle/interactive.ts
 cd sandcastle/claude
 
 # 1. Build the Docker image
-./build-image.sh
+./.sandcastle/build-image.sh
 
 # 2. Launch the interactive Claude Code TUI
 tsx --tsconfig=.sandcastle/tsconfig.json .sandcastle/interactive.ts
 
 # 3. (In a separate terminal) Open a shell inside the running container
-./shell.sh
+./.sandcastle/shell.sh
 ```
 
 ---
@@ -112,4 +112,4 @@ tsx --tsconfig=.sandcastle/tsconfig.json .sandcastle/interactive.ts
    .antigravity/
    .claude/projects/
    ```
-4. Run `./build-image.sh` and start pairing!
+4. Run `./.sandcastle/build-image.sh` and start pairing!

@@ -1,9 +1,11 @@
-# Sandcastle Sandbox Templates for TaskManager
+# Sandcastle Sandbox Templates & Base Images for TaskManager
 
-This directory provides two ready-to-use, **language-agnostic** templates demonstrating real-world Sandcastle Docker container sandboxing with **TaskManager (`tm`)** and isolated **Git worktrees**:
+This directory provides ready-to-use Sandcastle Docker container sandboxing with **TaskManager (`tm`)** and isolated **Git worktrees**:
 
-1. [`agy/`](agy/): Interactive sandbox using **Google Antigravity CLI (`agy`)**.
-2. [`claude/`](claude/): Interactive sandbox using **Anthropic Claude Code (`claude`)**.
+1. [`base/`](base/): Production-ready base Docker images with `tm`, core system utilities (`curl`, `git`, `jq`, `sudo`, `build-essential`), `vim`, and pre-installed agent CLIs (`sandcastle-base:claude` and `sandcastle-base:agy`).
+2. [`examples/custom-project/`](examples/custom-project/): Concrete example demonstrating how to extend the base images for a specific project.
+3. [`agy/`](agy/): Standalone template for **Google Antigravity CLI (`agy`)**.
+4. [`claude/`](claude/): Standalone template for **Anthropic Claude Code (`claude`)**.
 
 ---
 

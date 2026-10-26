@@ -34,6 +34,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # 2. Install Anthropic Claude Code CLI globally
 RUN npm install -g @anthropic-ai/claude-code
 
+# 3. Install TaskManager (tm) directly from GitHub Release
+ARG TM_VERSION="latest"
+RUN if [ "${TM_VERSION}" = "latest" ]; then \
+        TM_URL="https://github.com/Shammas44/tm/releases/latest/download/tm-linux-amd64"; \
+    else \
+        TM_URL="https://github.com/Shammas44/tm/releases/download/${TM_VERSION}/tm-linux-amd64"; \
+    fi && \
+    echo "==> Downloading TaskManager from ${TM_URL}..." && \
+    curl -fsSL "${TM_URL}" -o /usr/local/bin/tm && \
+    chmod 755 /usr/local/bin/tm && \
+    ln -sf /usr/local/bin/tm /usr/bin/tm
+
 # ==============================================================================
 # [PROJECT EXTENSION POINT]
 # Add your project-specific toolchain, compilers, or language runtimes here:

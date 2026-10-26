@@ -45,9 +45,10 @@
 ## Quickstart
 
 ```bash
-# 1. Build binaries
+# 1. Build & install binaries
 make build         # Native binary at bin/tm
 make build-linux   # Static Linux binary at bin/tm-linux-amd64 (CGO_ENABLED=0)
+sudo make install  # Install to /usr/local/bin (or 'make install-user' for ~/.local/bin)
 
 # 2. Initialize session
 ./bin/tm init

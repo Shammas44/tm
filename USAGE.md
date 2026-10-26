@@ -30,20 +30,35 @@ make build
 ./bin/tm --help
 ```
 
-### 2.2 Cross-Compiling Static Linux Binary (for Docker / Containers)
+### 2.2 Cross-Compiling & Installing Static Linux Binary (for Docker / Containers)
 
 To produce a completely static, stripped ELF binary for container bind-mounting:
 
 ```bash
 make build-linux
 # Binary is generated at bin/tm-linux-amd64 (CGO_ENABLED=0, stripped, ~8MB)
+
+# Install static Linux binary system-wide (e.g. inside Linux container or VM)
+sudo make install-linux
+
+# Or stage to ~/.local/bin/tm-linux-amd64 on macOS host for Sandcastle discovery
+make install-linux-user LINUX_BIN_NAME=tm-linux-amd64
 ```
 
 ### 2.3 Installing into `$PATH`
 
 ```bash
-# Local machine
-sudo cp bin/tm /usr/local/bin/tm
+# System-wide installation (default: /usr/local/bin)
+sudo make install
+
+# User-only installation (~/.local/bin)
+make install-user
+
+# Custom prefix (e.g. /opt/bin)
+make install PREFIX=/opt
+
+# Direct Go toolchain installation ($GOPATH/bin)
+make install-go
 
 # Verify installation
 tm --help
